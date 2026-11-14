@@ -50,3 +50,32 @@ def test_observations_layer(dataset, clean):
     assert obs["指标_零覆盖"] == ["T03I1"]          # T03 仅有的题全被隔离
     assert obs["节点_学生_零记录"] == {"EN02": ["E04", "E05"]}
     assert "不得解释为未掌握" in obs["解读提示"]
+
+
+def test_repaired_records_show_applied_disposition(dataset, clean):
+    """差异化处置下，被纠正的记录其原始 issue 的处置文案必须反映实际生效的处置."""
+    import shutil, tempfile
+    from pathlib import Path
+    from conftest import FIXTURES
+    from study_companion.load import load_all
+    from study_companion.clean import build_valid_records as bvr
+
+    with tempfile.TemporaryDirectory() as td:
+        for name in ["课程要求.csv", "题目与材料.csv", "模拟学生.csv",
+                     "测验节点.csv", "字段说明.csv"]:
+            shutil.copy(FIXTURES / name, Path(td) / name)
+        lines = open(FIXTURES / "作答记录.csv", encoding="utf-8-sig").read().splitlines()
+        lines.append("XR0300,E05,QX08,T03,EN02,E05-EN02-QX08,1,"
+                     "2026-06-17T15:00:00+08:00,已评分,4,3,x<2,1. 步骤一,"
+                     "QX08P1=1；QX08P2=1；QX08P3=1")
+        open(Path(td) / "作答记录.csv", "w", encoding="utf-8-sig",
+             newline="").write("\n".join(lines) + "\n")
+        ds = load_all(Path(td))
+        report = build_quality_report(ds, bvr(ds))
+        entry = next(a for a in report.anomaly_records
+                     if a["记录编号"] == "XR0300")
+        assert entry["统计口径"] == "corrected"
+        for d in entry["处置与依据"]:
+            if d["类型"] in ("score_exceeds_full", "total_points_mismatch"):
+                assert "已被「" in d["处置"] and "纠正" in d["处置"], \
+                    f"被纠正记录的原始 issue 不得再显示'隔离'文案: {d}"

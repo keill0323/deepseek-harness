@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from .clean import (
     CleanResult,
     DISPOSITIONS,
+    ISSUE_SCORE_REPAIRED_FROM_POINTS,
 )
 from .schema import (
     Dataset,
@@ -96,7 +97,14 @@ def build_quality_report(dataset: Dataset, clean: CleanResult,
                     {
                         "类型": issue,
                         "说明": ISSUE_LABELS.get(issue, issue),
-                        "处置": DISPOSITIONS[issue]["处置"],
+                        # 差异化处置下，被"评分点自洽修正"取代的 issue 不再显示
+                        # 静态的"隔离"文案——报告必须反映实际生效的处置
+                        "处置": (f"已被「{ISSUE_LABELS['score_repaired_from_points']}」"
+                                 f"取代：本记录实际按评分点合计纠正（corrected）"
+                                 if ISSUE_SCORE_REPAIRED_FROM_POINTS in vr.issues
+                                 and issue in ("score_exceeds_full",
+                                               "total_points_mismatch")
+                                 else DISPOSITIONS[issue]["处置"]),
                         "依据": DISPOSITIONS[issue]["依据"],
                     }
                     for issue in vr.issues
