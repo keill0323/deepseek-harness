@@ -12,14 +12,14 @@
 - `compare_with_peers`：将目标学生与同班同学逐人比较。
 - `analyze_class`：输出班级节点掌握情况、薄弱节点与学生汇总。
 - `compare_classes`：比较两个班级在各知识节点上的得分率和差值。
-- CLI 已通过 `apps/study-assistant/src/index.ts` 暴露对应操作，可直接参与前后端联调。
+- CLI 通过 `modules/app/cli.ts run --operation`（compare_with_peers / compare_students / compare_classes / analyze_class）暴露，交互报告 `modules/app/cli.ts export` 直接渲染。
 
 ## 计算口径
 
 1. 仅对有效记录求和，忽略无效作答。
 2. 节点得分率按 `earned / possible` 计算；分母为零时返回 `null`，不伪造结果。
 3. 两对象均有可比数据时才计算差值与领先方。
-4. 班级薄弱节点依据模块参数中的阈值判定。
+4. 班级薄弱节点按节点得分率排序判定；未教学主题单独标识，不因无记录列为薄弱（core.ts 实际口径）。
 5. 输出保留数据质量信息，便于定位“记录不足、暂不能确定”的场景。
 
 ## 输入与输出
