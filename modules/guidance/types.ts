@@ -18,6 +18,22 @@ export interface LearningActivity {
   prompt: string
   observation: string
   adjust_when: string
+  /** Observable evidence that the activity has been completed without a mastery claim. */
+  success_criteria: string[]
+  /** Next action when the success criteria are met. */
+  next_if_success: string
+  /** Next action when the student still needs support. */
+  next_if_not: string
+}
+
+/** Evidence sufficiency for one plan, separate from observed score. */
+export type PlanCertainty = 'insufficient' | 'provisional' | 'adequate'
+
+/** A taught indicator without usable scored evidence in the selected node. */
+export interface EvidenceGap {
+  indicator_id: string
+  topic_id: string
+  reason: string
 }
 
 /** An executable local-rule plan; missing observations never become a mastery claim. */
@@ -27,6 +43,9 @@ export interface LearningPlanPayload {
   node_id: string
   plan_type: 'targeted_practice' | 'extension' | 'observation' | 'blocked'
   diagnosis_status: 'ok' | 'insufficient_data' | 'needs_review' | 'error'
+  certainty: PlanCertainty
+  summary: string
+  evidence_gaps: EvidenceGap[]
   statistics: StudentStats
   activities: LearningActivity[]
   delivery: {

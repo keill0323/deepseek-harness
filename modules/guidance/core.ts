@@ -3,7 +3,8 @@ import { get_student_stats } from '../data/core.ts'
 import type { CsvRow, PreparedDataset, ResultEnvelope, StudentScope, StudentStats } from '../data/types.ts'
 import { diagnose_student } from '../diagnosis/core.ts'
 import type { DiagnosisPayload, Finding } from '../diagnosis/core.ts'
-import type { HintPayload, HintRequest, LearningActivity, LearningPlanPayload } from './types.ts'
+import { INDICATOR_GUIDANCE, guidance_for } from './knowledge.ts'
+import type { EvidenceGap, HintPayload, HintRequest, LearningActivity, LearningPlanPayload, PlanCertainty } from './types.ts'
 
 function result<T>(
   dataset: PreparedDataset, scope: Record<string, string | boolean>, payload: T,
@@ -63,6 +64,8 @@ function methodHint(family: ReturnType<typeof skillFamily>, level: 1 | 2 | 3): s
 }
 
 function focusedHint(item: CsvRow, requirement: CsvRow | undefined, level: 1 | 2 | 3): string {
+  const indicatorGuidance = item['指标编号'] ? INDICATOR_GUIDANCE[item['指标编号']] : undefined
+  if (indicatorGuidance) return indicatorGuidance.hints[level - 1]!
   const text = `${item['题干或内容'] ?? ''} ${requirement?.['观察指标'] ?? ''}`
   const hints = /方程组|消元|二元/u.test(text) ? [
     '先确认各未知量和每个等式的含义，选一个准备消去的未知量。',
@@ -109,6 +112,7 @@ export function build_learning_plan(
   const stats = statisticsMatch ? statistics : get_student_stats(dataset, scope)
   const payload: LearningPlanPayload = {
     engine: 'local_rules', ...scope, plan_type: 'blocked', diagnosis_status: diagnosis.result_status,
+    certainty: 'insufficient', summary: '计划尚未生成，需先核对统计和诊断状态。', evidence_gaps: [],
     statistics: stats.payload, activities: [], review_record_ids: stats.payload.review_record_ids,
     delivery: {
       first_activity_ids: [], follow_up_activity_ids: [], first_batch_limit: 3,
@@ -151,6 +155,18 @@ export function build_learning_plan(
   payload.plan_type = planType
   const limitations = ['本计划由本地规则生成，未调用远程大模型；建议依据指定节点已有表现，不代表真实教学成效。']
   const ordered = [...dataset.input.requirements].sort((a, b) => compareText(a['指标编号'] ?? '', b['指标编号'] ?? ''))
+  const evidenceGaps: EvidenceGap[] = ordered.filter(requirement => taughtTopics.has(requirement['主题编号'] ?? '')
+    && !scoredIndicators.some(indicator => indicator.indicator_id === requirement['指标编号']))
+    .map(requirement => ({ indicator_id: requirement['指标编号']!, topic_id: requirement['主题编号']!, reason: '该已教指标在当前节点没有可用于本计划的已评分证据，先补充观察，不判定未掌握。' }))
+  payload.evidence_gaps = evidenceGaps
+  const certainty: PlanCertainty = valid.length === 0 ? 'insufficient'
+    : planType === 'observation' || valid.length < 3 ? 'provisional' : 'adequate'
+  payload.certainty = certainty
+  payload.summary = planType === 'targeted_practice'
+    ? `当前节点有 ${valid.length} 条有效证据，优先处理出现失分的指标，并按顺序完成复盘、练习与检查。`
+    : planType === 'extension'
+      ? '当前节点已教指标均有有效表现，安排解释、检验和迁移；该表现不等同于长期掌握。'
+      : '当前节点证据不足或存在未覆盖的已教指标，先补充观察，不把缺记录解释为未掌握。'
   const priorities: Array<{ requirement: CsvRow; kind: LearningActivity['kind']; evidence: string[]; rationale: string; findings: Finding[]; score_rate: number | null }> = []
   for (const requirement of ordered) {
     const indicatorId = requirement['指标编号'] ?? ''
@@ -241,10 +257,15 @@ export function build_learning_plan(
           : '先独立完成同指标尚未尝试的题目，再解释每一步依据，用另一种检查方法检验结果。'
         : kind === 'observation' ? '先独立完成所列题目并保留步骤；需要提示时说明使用到哪一级，供教师区分独立完成与借助提示完成。'
           : '先对照已有作答核对失分位置，再完成所列练习；每次只看一级提示，保留修正前后的步骤。',
-      observation: '记录答案、关键步骤、分点评分和实际使用的提示等级；不要仅记录是否完成。',
-      adjust_when: kind === 'extension' ? '若解释或检验暴露新问题，记录新作答后重新诊断；若表现稳定，再由教师选择新的同范围任务。'
-        : kind === 'observation' ? '得到新的有效作答与评分后重新运行同节点诊断；未取得记录前保持“证据不足”。'
-          : '若能独立说明依据并完成相同指标的练习，再减少提示；若错误重复，保留新证据并由教师调整讲解。',
+      observation: guidance_for(indicatorId).observation.join('；'),
+      adjust_when: guidance_for(indicatorId).adjustment.join(''),
+      success_criteria: [...guidance_for(indicatorId).success_criteria],
+      next_if_success: kind === 'extension' ? '记录解释和检验证据；若仍稳定，再由教师选择新的同范围任务。'
+        : kind === 'observation' ? '再补一题同指标变式；仍能独立完成后才记为初步掌握。'
+          : '减少提示层级，完成同指标变式并说明依据。',
+      next_if_not: kind === 'extension' ? '保留本次证据并重新诊断；针对首次卡点安排同结构任务。'
+        : kind === 'observation' ? '记录提示层级与卡点，进入该指标的小步辅导。'
+          : '回到对应学习卡，降低一个认知步骤并保留新作答供教师调整。',
     }
     payload.activities.push(activity)
   }

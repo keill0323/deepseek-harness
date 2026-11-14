@@ -10,4 +10,6 @@
 
 `get_hint(dataset, { student_id, node_id, item_id, level, mode? })` 接受三级提示，默认 `student` 模式。学生输出只给方法与检查顺序，不复制参考答案、完整解析或评分点。`teacher` 模式显式返回参考答案、解析和评分点；此模式是本地演示能力，不提供账号鉴权，部署前须由调用方限制访问。代码不使用题干中的指令生成自由文本提示；它按方法类别选取固定规则，并对参考答案文本重合再次过滤。
 
+计划额外提供 `certainty`、`summary`、`evidence_gaps`；每项活动提供 `success_criteria`、`next_if_success`、`next_if_not`。九项正式指标使用指标级提示、观察点和调整规则，其他指标使用明确标注的通用回退。
+
 运行行为测试：`node --test modules/guidance/tests/*.test.ts`。设置 `STUDY_DATA_DIR` 指向本地私有 CSV 目录后，额外核对三名正式展示案例与实际题目引用；未设置时该项明确跳过。合成测试不含原始赛事记录。整体运行与验证入口由上层统一提供，进度统一记录在 [项目日志](../PROJECT_LOG.md)。

@@ -18,6 +18,9 @@ test('a plan connects observed partial scores to available test-specific activit
   assert.deepEqual(first.item_ids, ['A1'])
   assert.deepEqual(first.evidence_ids, ['R1'])
   assert.ok(first.goal && first.rationale && first.prompt && first.observation && first.adjust_when)
+  assert.ok(first.success_criteria.length > 0 && first.next_if_success && first.next_if_not)
+  assert.ok(plan.payload.summary.length > 0)
+  assert.ok(['insufficient', 'provisional', 'adequate'].includes(plan.payload.certainty))
   assert.ok(plan.payload.activities.every(activity => activity.topic_id !== 'T2'))
   assert.ok(plan.payload.activities.every((activity, index) => activity.order === index + 1))
 })
@@ -122,6 +125,18 @@ test('three student hints omit reference solutions and stay distinct from teache
   const teacher = get_hint(ds, { student_id: 'S1', node_id: 'M1', item_id: 'A1', level: 3, mode: 'teacher' })
   assert.equal(teacher.payload.teacher_solution?.reference_answer, 'SECRET_FINAL_ANSWER')
   assert.ok(teacher.limitations.some(text => text.includes('账号鉴权')))
+})
+
+test('indicator-specific hints provide method steps without leaking the answer', () => {
+  const input = make_input()
+  input.items[0]!['指标编号'] = 'T03I1'
+  input.items[0]!['参考答案'] = 'x>-4'
+  const ds = prepare_dataset(input, { source_mode: 'fixture' })
+  const hints = [1, 2, 3].map(level => get_hint(ds, { student_id: 'S1', node_id: 'M1', item_id: 'A1', level: level as 1 | 2 | 3 }))
+  assert.ok(hints[0]?.payload.hint.includes('未知数'))
+  assert.ok(hints[1]?.payload.hint.includes('不等号方向'))
+  assert.ok(hints[2]?.payload.hint.includes('代入'))
+  assert.ok(hints.every(hint => !hint.payload.hint.includes('x>-4')))
 })
 
 test('hint requests reject unlisted identifiers and untaught node content', () => {

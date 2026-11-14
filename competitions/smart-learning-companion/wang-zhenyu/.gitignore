@@ -1,0 +1,5 @@
+private-data/**
+!private-data/.gitkeep
+generated/**
+demo/data.js
+node_modules/

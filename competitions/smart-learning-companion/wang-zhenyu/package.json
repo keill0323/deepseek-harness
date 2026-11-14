@@ -1,0 +1,16 @@
+{
+  "name": "@wang-zhenyu/smart-learning-companion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "智慧学伴：个性化建议与分步辅导模块",
+  "scripts": {
+    "build": "node scripts/build-deliverable.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "build:example": "node scripts/build-example.mjs",
+    "build:real": "node scripts/build-deliverable.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

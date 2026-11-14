@@ -275,6 +275,7 @@ function vStudentPlan(item) {
     producer_version: plan.producer_version, source_mode: plan.source_mode, scope: plan.scope,
     result_status: plan.result_status, payload: {
       student_id: plan.payload.student_id, node_id: plan.payload.node_id, plan_type: plan.payload.plan_type,
+      certainty: plan.payload.certainty, summary: plan.payload.summary, evidence_gaps: plan.payload.evidence_gaps,
       ...(plan.payload.delivery ? { delivery: plan.payload.delivery } : {}),
       activities: plan.payload.activities.map(activity => ({
         activity_id: activity.activity_id, order: activity.order, kind: activity.kind, goal: activity.goal,
@@ -282,6 +283,7 @@ function vStudentPlan(item) {
         ...(activity.selection_reason ? { selection_reason: activity.selection_reason } : {}),
         indicator_id: activity.indicator_id, topic_id: activity.topic_id, item_ids: activity.item_ids, material_ids: activity.material_ids,
         prompt: activity.prompt, observation: activity.observation, adjust_when: activity.adjust_when,
+        success_criteria: activity.success_criteria, next_if_success: activity.next_if_success, next_if_not: activity.next_if_not,
         hints: Object.fromEntries(activity.item_ids.map(id => [id, (item.hints[id] ?? []).map(hint => ({ level: hint.payload.level, hint: hint.payload.hint }))])),
       })),
     }, limitations: ['学生练习清单不包含原始答案、参考答案、解答过程或分点评分。'],
@@ -292,7 +294,10 @@ function vPlan() {
   const item = vCase()
   if (!item) return vMain.append(vEmpty('当前没有可用计划。'))
   vCurrentExport = item.plan
-  vMain.append(vEl('div', 'plan-intro', vEl('div', '', vEl('p', 'eyebrow', '当前建议类型'), vEl('h2', '', vKindNames[item.plan.payload.plan_type]), vEl('p', 'muted', '本地规则根据当前节点已有记录生成，可由教师调整。')),
+  const certaintyNames = { insufficient: '证据不足', provisional: '结论暂定', adequate: '证据较充分' }
+  vMain.append(vEl('div', 'plan-intro', vEl('div', '', vEl('p', 'eyebrow', '当前建议类型'), vEl('h2', '', vKindNames[item.plan.payload.plan_type]),
+    vEl('p', 'muted', `证据状态：${certaintyNames[item.plan.payload.certainty] ?? '证据不足'} · ${item.plan.payload.summary ?? '本地规则根据当前节点已有记录生成。'}`),
+    item.plan.payload.evidence_gaps?.length ? vEl('p', 'muted', `补充观察：${item.plan.payload.evidence_gaps.map(gap => gap.indicator_id).join('、')}`) : null),
     vButton('导出学生练习清单', () => vDownload(vStudentPlan(item), `${vState.student}-${vState.node}-student-plan.json`), 'button button-primary')))
   if (!item.plan.payload.activities.length) vMain.append(vEmpty('诊断未完成或缺少合适材料，暂未生成活动。请先查看处理说明。'))
   const firstIds = new Set(item.plan.payload.delivery?.first_activity_ids ?? item.plan.payload.activities.map(activity => activity.activity_id))
@@ -327,7 +332,12 @@ function vPlan() {
         question?.['选项'] ? vEl('p', 'preserve muted', question['选项']) : null,
         controls, hintText)
     })
-    const detail = vEl('dl', 'activity-details', vEl('dt', '', '观察什么'), vEl('dd', '', activity.observation), vEl('dt', '', '何时调整'), vEl('dd', '', activity.adjust_when))
+    const detail = vEl('dl', 'activity-details',
+      vEl('dt', '', '完成标准'), vEl('dd', '', (activity.success_criteria ?? []).join('；')),
+      vEl('dt', '', '观察什么'), vEl('dd', '', activity.observation),
+      vEl('dt', '', '达成后'), vEl('dd', '', activity.next_if_success ?? '减少提示并进入同指标变式。'),
+      vEl('dt', '', '未达成'), vEl('dd', '', activity.next_if_not ?? '保留新证据并由教师调整。'),
+      vEl('dt', '', '何时调整'), vEl('dd', '', activity.adjust_when))
     return vEl('section', 'panel activity', vEl('div', 'activity-heading', vEl('span', 'activity-number', String(activity.order).padStart(2, '0')),
       vEl('div', '', vEl('span', 'eyebrow', vKindNames[activity.kind]), vEl('h2', '', activity.goal))),
       vEl('p', 'preserve', activity.rationale), activity.selection_reason ? vEl('p', 'selection-reason', vSelectionNames[activity.selection_reason] ?? '依据当前学习需求选择') : null,

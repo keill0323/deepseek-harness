@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>智慧学伴 · 个性化学习工作台</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">学</div>
+        <div><strong>智慧学伴</strong><span>个性化学习工作台</span></div>
+      </div>
+      <div class="owner-chip">王振宇 · 个性化建议与分步辅导</div>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" data-view="overview">模块概览</button>
+        <span id="case-nav"></span>
+        <button class="nav-item" data-view="students">学生索引</button>
+      </nav>
+      <div class="sidebar-note">
+        <span class="dot"></span>
+        <p>学生端提示不直接给出答案。教师解析与建议依据分离展示。</p>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">SMART LEARNING COMPANION / MODULE 04</p>
+          <h1 id="page-title">个性化建议与分步辅导</h1>
+        </div>
+        <div class="top-actions">
+          <span class="status-pill" id="data-version">数据版本加载中</span>
+          <button class="ghost-button" id="print-button">打印当前页</button>
+        </div>
+      </header>
+
+      <section id="view-overview" class="view active">
+        <div class="hero-grid">
+          <article class="hero-card">
+            <div class="hero-copy">
+              <span class="kicker">证据驱动的学习支持</span>
+              <h2>从一条真实作答，走到一份可执行的学习计划</h2>
+              <p>计划不是泛化的“加强练习”，而是把学习要求、已有表现、具体材料、提示层级和调整条件连成一条可核查链路。</p>
+              <div class="flow-row" aria-label="辅导链路">
+                <span>证据</span><i>→</i><span>诊断</span><i>→</i><span>计划</span><i>→</i><span>提示</span><i>→</i><span>练习</span><i>→</i><span>调整</span>
+              </div>
+            </div>
+            <div class="hero-stat">
+              <strong id="hero-rate">加载中</strong>
+              <span>全量已评分记录得分率</span>
+              <small id="hero-detail">正在读取数据</small>
+            </div>
+          </article>
+          <article class="insight-card">
+            <span class="kicker">当前模块判断</span>
+            <h3>先处理“会步骤，但不会检查”的问题</h3>
+            <p id="insight-text">正在根据当前数据生成模块判断。</p>
+            <div class="mini-tags"><span>三层提示</span><span>真实题目</span><span>观察后调整</span></div>
+          </article>
+        </div>
+
+        <div class="metric-grid" id="overview-metrics"></div>
+
+        <div class="section-grid">
+          <article class="panel">
+            <div class="panel-head"><div><span class="kicker">指标表现</span><h3>九个观察指标的得分率</h3></div><span class="caption">仅统计已评分记录</span></div>
+            <div id="indicator-bars" class="bar-list"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><span class="kicker">质量口径</span><h3>数据如何处理</h3></div><span class="caption">可追溯</span></div>
+            <div class="quality-list" id="quality-summary"></div>
+          </article>
+        </div>
+
+        <article class="panel case-launcher">
+          <div class="panel-head"><div><span class="kicker">三类代表案例</span><h3>直接查看完整证据链</h3></div><span class="caption" id="case-source">任务书指定</span></div>
+          <div class="case-grid" id="case-cards"></div>
+        </article>
+      </section>
+
+      <section id="view-case" class="view">
+        <div id="case-content"></div>
+      </section>
+
+      <section id="view-students" class="view">
+        <article class="panel">
+          <div class="panel-head"><div><span class="kicker">40名学生</span><h3>学生索引与计划状态</h3></div><input id="student-search" class="search" type="search" placeholder="搜索学生编号、班级或指标" /></div>
+          <div class="table-wrap"><table><thead><tr><th>学生</th><th>班级</th><th>有效记录</th><th>得分率</th><th>覆盖主题</th><th>首要辅导指标</th><th></th></tr></thead><tbody id="student-table"></tbody></table></div>
+        </article>
+      </section>
+
+      <footer class="footer">
+        <span>智慧学伴 · 王振宇模块 · 计划版本 <b id="footer-version">1.0.0</b></span>
+        <span>证据可查 · 提示不泄题 · 调整有条件</span>
+      </footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="data.example.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
