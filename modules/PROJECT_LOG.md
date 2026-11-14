@@ -34,3 +34,28 @@
 - 每次分析复用同一快照和对象的统计、课程索引，拒绝异版本或异对象上下文，不设跨请求缓存。核验通过局部Map索引查找证据，另补缺失案例、阶段安排、虚构诊断发现及跨指标引用检查。复合索引编码避免编号含冒号时覆盖其他学生或班级。
 - 在同机同输入、7次运行中位数下，分析加核验从约171.7ms降至147.0ms，核验单项从约23.9ms降至5.6ms；本轮HTML编码约192.1ms，包含结构池生成。旧版HTML编码未作同口径计时，不能声称端到端生成或浏览器加载必然加速。可用 `study:benchmark` 复测，测量只代表当前机器和输入。
 - 本轮 `npm run study:test` 的构建、严格类型检查通过；数据36项、其余业务/集成69项，共105项通过，0失败、0跳过，含13项离线DOM交互。附加复核确认JSON往返、危险键、独立子对象及上下文隔离，无新增依赖安装。自动检查不能替代教师审核与真人验收。
+
+## 2026-11-14 队友代码交叉验收
+
+- 本轮只做代码审查和自动复验，未修改或合并队友业务代码，不代替指定队员真人签字。冻结检查对象为 `master/weiwenyu@17dd1af390`、`wangzhenyu@5f2b37d342` 和 `zongbow-comparison@ce7c01e30a`；结束前重新核对远程引用未变化。以分支声明的 `team-policy-v2` 差异化处置检查实现一致性，不将策略与旧版不同本身判成缺陷。
+- 隔离工作树位于本地忽略目录 `tmp/team-review`，复用已有Node依赖与 `D:/Anaconda/python.exe` 的pytest，未安装依赖、未改原始资料。王最新分支对语义复核二次隔离和统计总体计数的修复已识别，不将这些已修问题重复报为最新缺陷。
+- 现有检查：master业务TS构建/类型通过，108项通过、1项跨语言对拍初始跳过；王最新业务TS构建/类型通过，109项通过、1项对拍初始跳过。数据实现相同的master随后单独补跑原包基线与Python对拍，2/2通过。独立JS交付版现有测试5/5通过。Python默认Windows环境483通过、3项因未指定UTF-8读取JSON而失败；这3项以 `-X utf8` 重跑3/3通过。以下补充用例仍能复现，现有绿灯不足以证明整体验收通过。
+
+| 编号 | 等级 | 位置（均以王最新快照为准） | 已复现问题与修复方向 |
+|---|---|---|---|
+| XA-101 | P1 | `modules/comparison/core.ts:291`、`modules/app/verify.ts:81` | 原始主题与纠正主题未统一使用。原包DC01/N01班级T01显示133/229，同班个人统计汇总应133/230；合成T2纠正为T1的有效记录还会被导出核验误拒。消费方应统一采用有效主题。 |
+| XA-102 | P1 | `modules/diagnosis/core.ts:168`、`modules/guidance/core.ts:147` | 题库满分3、记录原满分5、得分3且合法分点合计3：数据正确纠正为3/3，诊断仍报失分，计划变成针对补弱。诊断、指标汇总和选题都应读取有效分值。 |
+| XA-103 | P1 | `competitions/smart-learning-companion/wang-zhenyu/scripts/build-deliverable.mjs:100` | 按固定记录编号套用历史修复。输入副本将DR0361更新为v2、真实0分、分点0，仍被改成1分，质量报告还称原值10。应按当前内容通用仲裁或复用统一清洗结果。 |
+| XA-104 | P1 | `competitions/smart-learning-companion/wang-zhenyu/src/recommendation-engine.mjs:308`、`scripts/build-deliverable.mjs:148` | 请求N02却混入N01满分和N02零分，输出50%而非N02的0%；传入其他学生证据也会挂到当前学生，validatePlan仍返回空错误清单。需强制学生/节点范围，验证实际材料引用；补充观察也可生成题库没有的题号。 |
+| XA-105 | P1 | `competition/src/study_companion/clean.py:229` | Python先按分点纠正超分，再判断范围隔离。范围外题兼有10/1与分点合计1时被统计为1/1。不可纠正的范围问题必须先阻断。 |
+| XA-106 | P1 | `competition/src/study_companion/clean.py:210` | 未验证评分点编号、单点上限及负分：NOT_A_POINT=3可支持10/3修成3/3；满分1的单点被写为3也可正常统计；-1/3与负分点自洽时还会统计负得分率。应先核对题库评分点与每点范围，再判断合计自洽。 |
+| XA-107 | P2 | `modules/data/core.ts:192` | 题库满分3、记录原满分1、得分2、合法分点1+1+0：纠正满分后仍留有旧越界标记，2/3被排除为null。范围检查应按有效满分执行或重新评估已解决问题。 |
+| XA-108 | P2 | `competition/src/study_companion/clean.py:232` | 纠错自洽比较原满分。题库3、原满分1、得分10、合法分点合计1时仍修成1/3；按其自身“合计等于权威满分”政策应隔离。需使用有效满分，避免TS/Python分叉。 |
+| XA-109 | P2 | `modules/guidance/core.ts:168` | D14/N02摘要声称已教指标均有有效表现，同一结果却列出T01I1、T01I3、T02I1三项缺口。应限定为已观察指标，不夸大覆盖。 |
+| XA-110 | P2 | `modules/guidance/knowledge.ts:131`、`modules/guidance/core.ts:67` | 合法新指标名constructor/toString命中普通对象原型，未走通用回退，计划和提示直接抛异常。需Map或自有属性检查。 |
+| XA-111 | P2 | `competitions/smart-learning-companion/wang-zhenyu/src/knowledge-base.mjs:44` | 学生提示直接给出“结果是3的倍数”，恰好是Q011所问关系，却自报不泄题且验证通过。应提示推导和检查方法，不给所问结论。 |
+| XA-112 | P2 | `.github/workflows/study-companion.yml:36` | competitions仅新增触发路径，作业并未执行其独立JS测试或构建；根study:test只覆盖modules，Python仅competition。需显式加入独立交付包测试和构建smoke。 |
+| XA-113 | P2 | `modules/verify.sh:94` | 导出失败被 `|| true` 吞掉，仅凭index.html存在报成功。已复现index写出后学生文件名超限，CLI退出1且无manifest；按脚本现有判据会把该步记为通过，未完整执行整条验收脚本。应检查退出码、完整manifest和必要文件。 |
+
+- 上述问题均在王最新分支仍存在；数据/Python代码与master一致。对拍仅验证了所给原包，额外五套合成CSV已证明两实现对节点范围、评分点和满分纠正的处理仍可分叉。复现脚本和产物留在 `tmp/team-review/data-review-repros`、`repros-guidance` 等本地忽略目录，未提交输入或导出。
+- 另有非阻断附项：Python班级统计直接API对未知节点返回正常空汇总（CLI已有节点校验）；比较说明仍声称所有复核记录不参与，但v2语义复核允许保留原分。建议统一接口错误和口径文案。当前结论为存在阻断项，修复后补回归并重新冻结，不能沿用原交叉验收文档的整体通过结论。
