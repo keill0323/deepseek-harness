@@ -150,6 +150,9 @@ export function build_learning_plan(
   const planType = hasPartial ? 'targeted_practice' : valid.length === 0 || missingTaughtTopic ? 'observation' : 'extension'
   payload.plan_type = planType
   const limitations = ['本计划由本地规则生成，未调用远程大模型；建议依据指定节点已有表现，不代表真实教学成效。']
+  if (diagnosis.payload.findings.some(finding => finding.finding_type === 'step_analysis_unavailable')) {
+    limitations.push('部分作答过程超出自动步骤核验能力；计划保留有效评分，未将无法自动核验解释为学生薄弱。')
+  }
   const ordered = [...dataset.input.requirements].sort((a, b) => compareText(a['指标编号'] ?? '', b['指标编号'] ?? ''))
   const priorities: Array<{ requirement: CsvRow; kind: LearningActivity['kind']; evidence: string[]; rationale: string; findings: Finding[]; score_rate: number | null }> = []
   for (const requirement of ordered) {
@@ -162,6 +165,7 @@ export function build_learning_plan(
     } else if (observed.earned_score !== null && observed.possible_score !== null && observed.earned_score < observed.possible_score) {
       const supported = diagnosis.payload.findings.filter(finding => finding.indicator_id === indicatorId
         && finding.category !== 'scoring_review' && finding.category !== 'insufficient_data'
+        && finding.finding_type !== 'step_analysis_unavailable'
         && finding.evidence_ids.every(id => !reviewIds.has(id)))
       priorities.push({ requirement, kind: 'targeted_practice', evidence: observed.evidence_ids, findings: supported,
         score_rate: observed.earned_score / observed.possible_score,
@@ -236,7 +240,7 @@ export function build_learning_plan(
         : kind === 'targeted_practice' ? `核对并巩固：${label}` : kind === 'extension' ? `解释并检验：${label}` : `补充观察：${label}`,
       indicator_id: indicatorId, topic_id: topicId, item_ids: [chosen['材料编号']!], material_ids: availableMaterialIds,
       evidence_ids: activityEvidence, rationale: specificFinding?.description ?? rationale,
-      prompt: selectionReason === 'diagnosed_error' ? `先回到原作答第${specificFinding!.step_refs.join('、')}步，说明这一步对两边做了什么运算、应使用哪条性质；再独立修正后续步骤并检查，不先照抄完整答案。`
+      prompt: selectionReason === 'diagnosed_error' ? `先回到原作答第${specificFinding!.step_refs.join('、')}步，说明这一步改变了哪些项或等式、不等式的两边，应使用哪条运算法则；再独立修正后续步骤并检查，不先照抄完整答案。`
         : kind === 'extension' ? selectionReason === 'explanation_check' ? '所列题目已有有效作答；本轮不只重填答案，请解释原步骤成立的理由，再用另一种方法检验或提出一个条件变化并说明影响。'
           : '先独立完成同指标尚未尝试的题目，再解释每一步依据，用另一种检查方法检验结果。'
         : kind === 'observation' ? '先独立完成所列题目并保留步骤；需要提示时说明使用到哪一级，供教师区分独立完成与借助提示完成。'

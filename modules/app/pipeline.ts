@@ -10,7 +10,7 @@ import { scope_key } from '../shared/result.ts'
  * @returns A derived current view; imported fields and historical versions remain intact.
  */
 export function prepare_workspace_dataset(input: DatasetInput, options: PrepareOptions = {}): PreparedDataset {
-  const dataset = prepare_dataset(input, { ...options, producer_version: options.producer_version ?? 'study-companion@0.3.0' })
+  const dataset = prepare_dataset(input, { ...options, producer_version: options.producer_version ?? 'study-companion@0.4.0' })
   const additionalReviews = new Map<string, string[]>()
   const observed = new Set(dataset.current.map(record => scope_key(record.student_id, record.node_id)))
   const recordIndex = new Map(dataset.current.map(record => [record.record_id, record]))
@@ -24,7 +24,10 @@ export function prepare_workspace_dataset(input: DatasetInput, options: PrepareO
         if (finding.category !== 'scoring_review') continue
         for (const id of finding.evidence_ids) {
           const current = recordIndex.get(id)
-          if (current?.include_in_statistics) additionalReviews.set(id, [...(additionalReviews.get(id) ?? []), finding.description])
+          if (current?.include_in_statistics) {
+            const location = finding.step_refs.length > 0 ? `原作答第${finding.step_refs.join('、')}步：` : ''
+            additionalReviews.set(id, [...(additionalReviews.get(id) ?? []), `${location}${finding.description}`])
+          }
         }
       }
     }

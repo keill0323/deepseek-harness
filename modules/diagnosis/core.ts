@@ -1,6 +1,7 @@
 import { get_student_stats } from '../data/core.ts'
 import type { CsvRow, EvidenceRecord, PreparedDataset, ResultEnvelope, StudentScope, StudentStats } from '../data/types.ts'
 import type { CurriculumEntry, CurriculumPayload, DiagnosisPayload, Finding } from './types.ts'
+import { analyze_steps } from './steps.ts'
 
 export type { CurriculumEntry, CurriculumMaterial, CurriculumPayload, CurriculumTopic, DiagnosisPayload, Finding } from './types.ts'
 
@@ -72,35 +73,6 @@ export function get_curriculum(dataset: PreparedDataset, query: { topic_id?: str
   return result(dataset, query.topic_id === undefined ? {} : { topic_id: query.topic_id }, { topics, entries, links }, entries.length > 0 ? 'ok' : 'insufficient_data', [], ['页码及页段取自输入课程索引；本函数不读取或声称核验了PDF页面。', '教材主题关系依据材料标题匹配，引用具体章节或练习时仍需核对正文。'])
 }
 
-interface Step { number: number; text: string }
-interface Inequality { coefficient: number; variable: string; operator: string; bound: number }
-
-function stepsOf(text: string): Step[] {
-  return text.split(/\r?\n/u).filter(line => line.trim() !== '').map((line, index) => {
-    const numbered = /^\s*(\d+)\s*[.．、)）]\s*(.*)$/u.exec(line)
-    return { number: numbered ? Number(numbered[1]) : index + 1, text: numbered ? numbered[2]! : line }
-  })
-}
-
-function inequality(text: string): Inequality | null {
-  const expression = text.normalize('NFKC').replace(/\s/gu, '').replace(/[−﹣]/gu, '-').replace(/^[解答][:：]/u, '').replace(/[。.;；]+$/u, '')
-  const parsed = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+)?)\*?([A-Za-z])([<>≤≥])([+-]?(?:\d+(?:\.\d+)?|\.\d+))$/u.exec(expression)
-  if (!parsed) return null
-  const coefficient = parsed[1] === '' || parsed[1] === '+' ? 1 : parsed[1] === '-' ? -1 : Number(parsed[1])
-  return { coefficient, variable: parsed[2]!, operator: parsed[3]!, bound: Number(parsed[4]) }
-}
-
-function wrongDirectionStep(record: EvidenceRecord): number | null {
-  const steps = stepsOf(record.steps)
-  for (let index = 1; index < steps.length; index += 1) {
-    const before = inequality(steps[index - 1]!.text)
-    const after = inequality(steps[index]!.text)
-    if (before && after && before.coefficient < 0 && after.coefficient === 1 && before.variable === after.variable
-      && Math.abs(before.bound / before.coefficient - after.bound) < 1e-9 && before.operator === after.operator) return steps[index]!.number
-  }
-  return null
-}
-
 function points(record: EvidenceRecord): Map<string, number> {
   const parsed = new Map<string, number>()
   for (const pair of record.point_scores.split(/[；;\n]/u)) {
@@ -156,14 +128,19 @@ export function diagnose_student(dataset: PreparedDataset, scope: StudentScope, 
       continue
     }
     if (!record.include_in_statistics) continue
-    const wrongStep = wrongDirectionStep(record)
-    if (wrongStep !== null) {
+    const analysis = analyze_steps(record.steps, item?.['题干或内容'] ?? '')
+    if (analysis.status === 'error' && analysis.error) {
+      const error = analysis.error
       const rubric = (item?.['评分点'] ?? '').split(/\r?\n/u)
-      const rootPoint = rubric.find(line => /负数/u.test(line) && /反向|方向/u.test(line))?.split(/\s/u)[0]
+      const rootPoint = error.finding_type === 'inequality_direction'
+        ? rubric.find(line => /负数/u.test(line) && /反向|方向/u.test(line))?.split(/\s/u)[0] : undefined
       const rootScore = rootPoint ? points(record).get(rootPoint) : undefined
       const scoringConflict = (rootScore !== undefined && rootScore > 0) || record.score === record.max_score
-      payload.findings.push({ ...baseFinding(entry, 'inequality_direction', record.record_id), category: scoringConflict ? 'scoring_review' : 'fact', title: scoringConflict ? '过程与分点评分需复核' : '负数除法步骤未改变方向', description: scoringConflict ? '相邻步骤显示除以负数后未改变不等号方向，但记录获得满分或相关评分点仍给分，应先核对过程与评分。' : '相邻两步显示两边除以同一负数后，数值相符但不等号仍保持原方向。后续解集沿用此步，不重复计作第二个独立问题。', item_id: record.item_id, evidence_ids: [record.record_id], step_refs: [wrongStep], point_refs: rootPoint ? [rootPoint] : [], })
+      payload.findings.push({ ...baseFinding(entry, error.finding_type, record.record_id), category: scoringConflict ? 'scoring_review' : 'fact', title: scoringConflict ? '过程与评分需复核' : error.title, description: `${error.description}${scoringConflict ? ' 但记录获得满分或与该错误明确对应的评分点仍给分，需先核对过程和评分，不据此断言学生薄弱。' : ''}`, item_id: record.item_id, evidence_ids: [record.record_id], step_refs: error.step_refs, point_refs: rootPoint ? [rootPoint] : [], })
       continue
+    }
+    if (analysis.status === 'unsupported') {
+      payload.findings.push({ ...baseFinding(entry, 'step_analysis_unavailable', record.record_id), category: 'inference', title: '自动步骤核验暂不支持此过程', description: `${analysis.reason} 此限制属于自动诊断能力，不表示缺少作答记录或学生未掌握；保留已有评分，请教师核对过程。`, item_id: record.item_id, evidence_ids: [record.record_id], step_refs: [], point_refs: [] })
     }
     if (record.score! < record.max_score!) {
       const missingPoints = [...points(record)].filter(([, score]) => score === 0).map(([id]) => id)
@@ -172,7 +149,7 @@ export function diagnose_student(dataset: PreparedDataset, scope: StudentScope, 
   }
   const hasReview = payload.findings.some(finding => finding.category === 'scoring_review')
   const status = hasReview ? 'needs_review' : stats.result_status
-  const limitations = [...stats.limitations, '步骤识别仅覆盖可直接核对的简单一元不等式连续变形，不进行一般代数推理或心理归因。', '课程页码来自输入索引；需结合实际PDF页面与教材正文核验引用。']
+  const limitations = [...stats.limitations, '步骤核验仅检查支持语法中的整式恒等及线性方程、不等式的相邻变形；不证明作答完整、建模正确或知识掌握。未支持过程单列为自动核验能力限制，不当作学生证据不足。', '课程页码来自输入索引；需结合实际PDF页面与教材正文核验引用。']
   if (hasReview) limitations.push('评分复核项不用于形成学生薄弱点；已有统计中的明确过程评分冲突也需由教师确认。')
   return result(dataset, { ...scope }, payload, status, records.map(record => record.record_id), limitations)
 }

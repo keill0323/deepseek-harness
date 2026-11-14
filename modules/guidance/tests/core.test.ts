@@ -268,7 +268,11 @@ test('official three-case plans remain differentiated and reference actual allow
   const absent = build_learning_plan(ds, { student_id: 'D17', node_id: 'N02' })
   assert.equal(targeted.payload.plan_type, 'targeted_practice')
   assert.ok(targeted.payload.activities.some(activity => activity.item_ids.includes('Q043') && activity.evidence_ids.includes('DR0023')))
-  assert.ok(targeted.payload.activities[0]?.item_ids.includes('Q043'))
+  const directionActivity = targeted.payload.activities.find(activity => activity.item_ids.includes('Q043'))!
+  assert.equal(directionActivity.selection_reason, 'diagnosed_error')
+  const diagnosis = diagnose_student(ds, { student_id: 'D01', node_id: 'N02' })
+  const firstActivity = targeted.payload.activities[0]!
+  assert.ok(firstActivity.finding_ids.some(id => diagnosis.payload.findings.some(finding => finding.finding_id === id && finding.category === 'fact' && finding.step_refs.length > 0)))
   assert.equal(targeted.payload.activities[0]?.selection_reason, 'diagnosed_error')
   assert.equal(targeted.payload.delivery.first_activity_ids.length, 3)
   assert.equal(strong.payload.plan_type, 'extension')

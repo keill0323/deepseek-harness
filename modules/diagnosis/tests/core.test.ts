@@ -64,14 +64,22 @@ test('a latest corrected solution supersedes the former direction error', () => 
   assert.equal(result.payload.stats.earned_score, 3)
 })
 
-test('missing process and non-equivalent adjacent calculations do not invent a step error', () => {
-  for (const steps of ['', '1. -3y<12。\n2. y<-7。', '1. -3y<12。\n2. z<-4。']) {
+test('missing process and a change of variable do not invent a step error', () => {
+  for (const steps of ['', '1. -3y<12。\n2. z<-4。']) {
     const diagnosed = diagnose_student(prepare_dataset(inequalityInput(steps)), { student_id: 'S1', node_id: 'M1' })
     assert.equal(diagnosed.payload.findings.some(finding => finding.finding_type === 'inequality_direction'), false)
     const partial = diagnosed.payload.findings.find(finding => finding.finding_type === 'partial_score')!
     assert.ok(partial)
     assert.deepEqual(partial.step_refs, [])
   }
+})
+
+test('a directly checkable inequality arithmetic error locates the first invalid transformation', () => {
+  const diagnosed = diagnose_student(prepare_dataset(inequalityInput('1. -3y<12。\n2. y<-7。\n3. y<-8。')), { student_id: 'S1', node_id: 'M1' })
+  const errors = diagnosed.payload.findings.filter(finding => finding.finding_type === 'inequality_transformation')
+  assert.equal(errors.length, 1)
+  assert.deepEqual(errors[0]!.step_refs, [2])
+  assert.equal(diagnosed.payload.findings.some(finding => finding.finding_type === 'partial_score'), false)
 })
 
 test('review records retain their reasons and never become a learner weakness', () => {
