@@ -11,6 +11,7 @@ test('data-layer semantic review remains statistic-eligible through the app pipe
     解答过程: '1. 得到结果1。',
     评分点得分: 'A1P1=0；A1P2=0；A1P3=0',
   })])
+  input.items[0]!['参考答案'] = '1'
 
   const prepared = prepare_dataset(input, { source_mode: 'fixture' })
   const original = prepared.current.find(record => record.record_id === 'R1')
