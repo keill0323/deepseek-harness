@@ -6,6 +6,7 @@ on:
     paths:
       - 'modules/**'
       - 'competition/**'
+      - 'competitions/**'
       - '.agents/skills/study-companion/**'
       - '.github/workflows/study-companion.yml'
       - 'package.json'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'modules/**'
       - 'competition/**'
+      - 'competitions/**'
       - '.agents/skills/study-companion/**'
       - '.github/workflows/study-companion.yml'
       - 'package.json'
