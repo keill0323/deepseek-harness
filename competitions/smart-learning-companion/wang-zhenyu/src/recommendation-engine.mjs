@@ -225,7 +225,7 @@ function buildCoveragePlan(request, evidence, questions, generatedAt) {
     : ['T02I1', 'T03I1'];
   const probeEvidence = probes.map((indicatorId, index) => {
     const choices = INDICATORS[indicatorId].practiceItems;
-    const itemId = index === 0 ? choices[Math.min(3, choices.length - 1)] : choices[Math.min(2, choices.length - 1)];
+    const itemId = index === 0 ? choices[Math.min(4, choices.length - 1)] : choices[Math.min(2, choices.length - 1)];
     const q = questions.get(itemId);
     return { itemId, indicatorId, q };
   });
@@ -244,7 +244,8 @@ function buildCoveragePlan(request, evidence, questions, generatedAt) {
     certainty: 'insufficient',
     primary_focus: null,
     summary: '现有证据只覆盖部分主题，先设计低负担观察任务，再决定后续强化方向。',
-    evidence_used: evidence.map((x) => itemSummary(x, questions)),
+    // 仅列已评分证据：待评分/未作答不是掌握度证据（与 remediation 分支口径一致）
+    evidence_used: evidence.filter((x) => x.status === STATUS_GRADED).map((x) => itemSummary(x, questions)),
     evidence_gaps: buildEvidenceGaps(evidence),
     material_refs: probes.flatMap((id) => materialRefs(id)),
     steps: [
