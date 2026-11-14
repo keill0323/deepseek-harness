@@ -205,8 +205,8 @@ function vOverview() {
   vMain.append(vMetrics([
     { label: '模拟学生', value: vStudents.length, detail: `${vWorkspace.classes.length} 个模拟班级` },
     { label: '当前作答事件', value: vWorkspace.summary.current_event_count, detail: `${vWorkspace.summary.raw_record_count} 行原始记录，先选最高修订` },
-    { label: '有效计分记录', value: vWorkspace.summary.included_count, detail: '通过质量检查的当前记录' },
-    { label: '等待复核', value: vWorkspace.summary.review_count, detail: '保留原值，暂不用于得分统计' },
+    { label: '有效计分记录', value: vWorkspace.summary.stat_included_count, detail: '实际进入统计的当前记录' },
+    { label: '等待复核', value: vWorkspace.summary.review_count, detail: '复核标记；结构冲突项暂不计分' },
   ]))
   const preferred = ['D01', 'D14', 'D17'].filter(id => vStudents.some(student => student.student_id === id))
   const representatives = [...new Set([...preferred, ...vStudents.map(student => student.student_id)])].slice(0, 3)
