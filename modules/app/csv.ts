@@ -77,5 +77,6 @@ export function csv_exports(workspace: ResultEnvelope<WorkspacePayload>): Array<
   }
   for (const [key, entry] of Object.entries(workspace.payload.class_reports)) results.push([`classes/${encodeURIComponent(key)}.csv`, entry])
   for (const [key, entry] of Object.entries(workspace.payload.class_plans)) results.push([`class-plans/${encodeURIComponent(key)}.csv`, entry])
+  for (const [key, entry] of Object.entries(workspace.payload.node_pairings)) results.push([`node-pairings/${encodeURIComponent(key)}.csv`, entry])
   return results
 }

@@ -29,7 +29,7 @@ export async function check_export(directory: string, sourceMode: 'live' | 'fixt
     }
     const current = verify_workspace(workspace)
     if (current.status !== 'passed' || !isDeepStrictEqual(current, await json('acceptance.json'))) return false
-    for (const [folder, values] of Object.entries({ students: workspace.payload.cases, classes: workspace.payload.class_reports, 'class-plans': workspace.payload.class_plans })) {
+    for (const [folder, values] of Object.entries({ students: workspace.payload.cases, classes: workspace.payload.class_reports, 'class-plans': workspace.payload.class_plans, 'node-pairings': workspace.payload.node_pairings })) {
       for (const [key, value] of Object.entries(values)) if (!isDeepStrictEqual(value, await json(`${folder}/${encodeURIComponent(key)}.json`))) return false
     }
     const csvFiles = csv_exports(workspace)

@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+import { build_node_pairings } from './core.ts'
 import type { ResultEnvelope } from '../data/types.ts'
 import type { WorkspacePayload } from './core.ts'
 import { scope_key } from '../shared/result.ts'
@@ -43,6 +45,10 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
       if (!record || record.student_id !== student || record.node_id !== node) errors.push(`${label}: 证据${id}对象或节点不同`)
     }
   }
+  const expectedPairings = build_node_pairings(data.browser_snapshot)
+  if (!data.node_pairings || !isDeepStrictEqual(Object.keys(expectedPairings).sort(), Object.keys(data.node_pairings).sort())
+    || Object.entries(expectedPairings).some(([key, value]) => !isDeepStrictEqual(value, data.node_pairings[key]))) errors.push('跨节点配对缺失或与当前输入、对象、证据和原因不一致')
+  for (const [key, entry] of Object.entries(data.node_pairings ?? {})) check(entry, key)
   check(data.curriculum, 'curriculum')
   for (const entry of data.curriculum.payload.entries) {
     for (const id of [...entry.material_ids, ...entry.question_ids]) if (!materials.has(id)) errors.push(`curriculum: 材料或题目${id}不存在`)
@@ -136,7 +142,7 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
   }
   return {
     status: errors.length ? 'failed' : 'passed',
-    checks: ['各模块版本一致', '对象与测验节点一致', '作答证据与材料编号存在', '活动依据排除复核记录', '学生提示无教师答案字段'],
+    checks: ['跨节点配对与当前输入一致', '各模块版本一致', '对象与测验节点一致', '作答证据与材料编号存在', '活动依据排除复核记录', '学生提示无教师答案字段'],
     errors: [...new Set(errors)], human_review: 'pending',
   }
 }

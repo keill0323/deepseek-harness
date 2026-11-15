@@ -97,6 +97,18 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   await writeFile(join(exportDirectory, 'index.html'), '<!doctype html><html>incomplete</html>')
   assert.equal(await check_export(exportDirectory, 'fixture'), false)
   await writeFile(join(exportDirectory, 'index.html'), html)
+  const pairingPath = join(exportDirectory, 'node-pairings', 'student%3AS1%3AM1%3AM2.json')
+  const pairing = await readFile(pairingPath, 'utf8')
+  const pairingCsv = await readFile(join(exportDirectory, 'csv', 'node-pairings', 'student%3AS1%3AM1%3AM2.csv'), 'utf8')
+  assert.deepEqual(csv_payload(pairingCsv), JSON.parse(pairing).payload)
+  const pairingRequest = ['run', '--data', directory, '--operation', 'inspect_node_pairing', '--request', '{"student_id":"S1","left_node_id":"M1","right_node_id":"M2"}', '--summary-only', '--fixture']
+  const singlePairing = join(directory, 'pairing.csv')
+  assert.equal(run([...pairingRequest, '--out', singlePairing, '--format', 'csv']).status, 0)
+  assert.equal(await readFile(singlePairing, 'utf8'), pairingCsv)
+  await unlink(pairingPath)
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+  await writeFile(pairingPath, pairing)
+  assert.equal(await check_export(exportDirectory, 'fixture'), true)
   await unlink(join(exportDirectory, 'class-plans', 'C1%3AM1.json'))
   assert.equal(await check_export(exportDirectory, 'fixture'), false)
 

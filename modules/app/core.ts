@@ -1,6 +1,6 @@
 import { get_evidence, get_student_stats } from '../data/core.ts'
 import type { EvidenceRecord, PreparedDataset, ResultEnvelope } from '../data/types.ts'
-import { analyze_class, compare_classes, compare_students, compare_with_peers } from '../comparison/core.ts'
+import { analyze_class, compare_classes, compare_students, compare_with_peers, inspect_node_pairing } from '../comparison/core.ts'
 import { diagnose_student, get_curriculum } from '../diagnosis/core.ts'
 import { build_learning_plan, get_hint } from '../guidance/core.ts'
 import { build_class_plan } from '../guidance/class.ts'
@@ -28,8 +28,31 @@ export interface WorkspacePayload {
   cases: Record<string, StudentCase>
   class_reports: Record<string, ReturnType<typeof analyze_class>>
   class_plans: Record<string, ReturnType<typeof build_class_plan>>
+  node_pairings: Record<string, ReturnType<typeof inspect_node_pairing>>
   quality_records: EvidenceRecord[]
   browser_snapshot: PreparedDataset
+}
+
+/**
+ * Enumerate every student/class and unordered pair of input nodes for report export.
+ * @param dataset - One prepared input snapshot.
+ * @returns Stable, escaped keys with explicit subject and node scopes in each result.
+ */
+export function build_node_pairings(dataset: PreparedDataset): WorkspacePayload['node_pairings'] {
+  const entries: WorkspacePayload['node_pairings'] = Object.create(null) as WorkspacePayload['node_pairings']
+  const nodes = dataset.input.nodes.map(row => row['节点编号']!).sort()
+  const subjects = [
+    ...dataset.input.students.map(row => ({ student_id: row['学生编号']! })),
+    ...[...new Set(dataset.input.students.map(row => row['模拟班级编号']!))].sort().map(class_id => ({ class_id })),
+  ]
+  for (let left = 0; left < nodes.length; left += 1) for (let right = left + 1; right < nodes.length; right += 1) {
+    for (const subject of subjects) {
+      const value = inspect_node_pairing(dataset, { ...subject, left_node_id: nodes[left]!, right_node_id: nodes[right]! })
+      const key = [value.payload.kind, value.payload.subject_id, nodes[left]!, nodes[right]!].map(encodeURIComponent).join(':')
+      entries[key] = value
+    }
+  }
+  return entries
 }
 
 /**
@@ -71,6 +94,8 @@ export function build_workspace(dataset: PreparedDataset): ResultEnvelope<Worksp
       if (classReports[key].result_status === 'error' || classPlans[key].result_status === 'error') operationFailures.push(key)
     }
   }
+  const nodePairings = build_node_pairings(dataset)
+  for (const [key, entry] of Object.entries(nodePairings)) if (entry.result_status === 'error') operationFailures.push(key)
   const sanitizedItems = dataset.input.items.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !['参考答案', '参考解析', '评分点'].includes(key))))
   const browserSnapshot: PreparedDataset = {
     ...dataset,
@@ -79,7 +104,7 @@ export function build_workspace(dataset: PreparedDataset): ResultEnvelope<Worksp
   }
   const payload: WorkspacePayload = {
     title: '智慧学伴', engine: 'local_rules', students, nodes, classes,
-    summary: dataset.summary, curriculum, cases, class_reports: classReports, class_plans: classPlans,
+    summary: dataset.summary, curriculum, cases, class_reports: classReports, class_plans: classPlans, node_pairings: nodePairings,
     // 质量记录 = 有 quality_issues 的全部当前记录（处置后仍可追溯，与验收书 6 条一致）
     quality_records: dataset.current.filter(record => record.quality_issues.length > 0), browser_snapshot: browserSnapshot,
   }
@@ -124,6 +149,7 @@ export function execute_operation(dataset: PreparedDataset, operation: string, r
       get_curriculum: ['topic_id'], get_evidence: ['student_id', 'node_id', 'record_ids', 'event_ids', 'include_history'],
       compare_students: ['left_student_id', 'right_student_id', 'node_id', 'item_ids'],
       compare_with_peers: ['student_id', 'node_id', 'class_id', 'item_ids'],
+      inspect_node_pairing: ['student_id', 'class_id', 'left_node_id', 'right_node_id'],
       analyze_class: ['class_id', 'node_id'], build_class_plan: ['class_id', 'node_id'], compare_classes: ['left_class_id', 'right_class_id', 'node_id', 'item_ids'],
       get_hint: ['student_id', 'node_id', 'item_id', 'level', 'mode'], workspace: [],
     }
@@ -132,6 +158,11 @@ export function execute_operation(dataset: PreparedDataset, operation: string, r
     for (const key of Object.keys(request)) if (!fields.includes(key)) throw new Error(`${operation} 不接受字段 ${key}`)
     const studentScope = (): { student_id: string; node_id: string } => ({ student_id: value(request, 'student_id'), node_id: value(request, 'node_id') })
     switch (operation) {
+      case 'inspect_node_pairing': {
+        if (('student_id' in request) === ('class_id' in request)) throw new Error('跨节点配对必须且只能指定一个学生或班级')
+        const subject = 'student_id' in request ? { student_id: value(request, 'student_id') } : { class_id: value(request, 'class_id') }
+        return inspect_node_pairing(dataset, { ...subject, left_node_id: value(request, 'left_node_id'), right_node_id: value(request, 'right_node_id') })
+      }
       case 'workspace': return build_workspace(dataset)
       case 'get_student_stats': return get_student_stats(dataset, studentScope())
       case 'diagnose_student': return diagnose_student(dataset, studentScope())

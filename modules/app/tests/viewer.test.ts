@@ -86,6 +86,55 @@ function mainText(window: Window): string {
   return window.document.querySelector('main')?.textContent ?? ''
 }
 
+test('node pairing displays gaps and exports the selected student/class and node order', async t => {
+  const input = make_input([
+    make_record(), make_record({ 记录编号: 'R2', 作答事件编号: 'E2', 节点编号: 'M2' }),
+  ])
+  const { window, downloads } = await setup(t, input)
+  click(window, '比较分析')
+  choose(window, '测验节点', 'M1')
+  choose(window, '比较方式', 'nodes')
+  assert.ok(mainText(window).includes('可配对 · 1 人'))
+  assert.ok(mainText(window).includes('该节点尚未教学此主题'))
+  assert.ok(mainText(window).includes('无作答记录'))
+  assert.ok(mainText(window).includes('不计算跨节点分数差'))
+  for (const mode of ['student', 'class']) {
+    choose(window, '配对对象', mode)
+    if (mode === 'class') choose(window, '配对班级', 'C2')
+    click(window, '导出当前 JSON')
+    const json = JSON.parse(await downloads.at(-1)!.blob.text())
+    assert.equal(json.payload.kind, mode)
+    assert.equal(json.payload.subject_id, mode === 'student' ? 'S1' : 'C2')
+    assert.deepEqual(json.payload.paired_item_ids, mode === 'student' ? ['A1'] : [])
+    click(window, '导出当前 CSV')
+    assert.deepEqual(csv_payload(await downloads.at(-1)!.blob.text()), json.payload)
+  }
+  choose(window, '配对对象', 'student')
+  choose(window, '测验节点', 'M2')
+  click(window, '导出当前 JSON')
+  const reversed = JSON.parse(await downloads.at(-1)!.blob.text())
+  assert.deepEqual(reversed.scope, { student_id: 'S1', left_node_id: 'M2', right_node_id: 'M1' })
+  choose(window, '比较方式', 'students')
+  assert.ok(!mainText(window).includes('跨节点观察配对S1'))
+  click(window, '导出当前 JSON')
+  assert.equal(JSON.parse(await downloads.at(-1)!.blob.text()).payload.kind, 'students')
+})
+
+test('a single-node report explains the missing pair and disables stale exports', async t => {
+  const input = make_input()
+  input.nodes = input.nodes.slice(0, 1)
+  const { window } = await setup(t, input)
+  click(window, '比较分析')
+  choose(window, '比较方式', 'nodes')
+  assert.ok(mainText(window).includes('至少需要两个测验节点'))
+  for (const label of ['导出当前 CSV', '导出当前 JSON']) {
+    const button = [...window.document.querySelectorAll('button')].find(item => item.textContent === label)!
+    assert.equal(button.disabled, true)
+  }
+  choose(window, '比较方式', 'peers')
+  click(window, '导出当前 JSON')
+})
+
 test('comparison review copy agrees with the displayed population and JSON/CSV exports', async t => {
   const input = make_input([
     make_record({ 得分: '0', 学生最终作答: '3', 评分点得分: 'A1P1=0；A1P2=0；A1P3=0' }),

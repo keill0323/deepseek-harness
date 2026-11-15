@@ -1,4 +1,4 @@
-/** Deterministic current-record selection, conservative score checks, and evidence queries. */
+/** Current-record selection, explicit quality corrections, scoped statistics and evidence queries. */
 import { createHash } from 'node:crypto'
 import type {
   CsvRow, DatasetInput, EvidencePayload, EvidenceQuery, EvidenceRecord, PreparedDataset,
@@ -279,9 +279,9 @@ function recordOrder(a: EvidenceRecord, b: EvidenceRecord): number {
 }
 
 /**
- * Select the highest revision per event and quarantine inconsistent scores without repairing them.
+ * Select each event's highest revision and apply differentiated or conservative quality handling.
  * @param input - Literal source tables; exact repeated rows are imported once.
- * @param options - Explicit source origin and implementation version.
+ * @param options - Source origin, implementation version and quality policy; differentiated by default.
  * @returns A snapshot retaining all distinct historical versions and the current view.
  * @throws If identifiers, revision order, or equally identified source rows are ambiguous.
  */
