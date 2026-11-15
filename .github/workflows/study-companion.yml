@@ -37,6 +37,8 @@ jobs:
         run: npm run study:test
       - name: Export a self-contained synthetic demo
         run: npm run study:demo -- --out tmp/study-data/demo-ci
+      - name: Verify teacher export and isolated student pages
+        run: node modules/app/check-export.ts tmp/study-data/demo-ci/report fixture
 
   python-reference:
     runs-on: ubuntu-24.04  # ubuntu-latest 已迁 Ubuntu 26，无 python3.9

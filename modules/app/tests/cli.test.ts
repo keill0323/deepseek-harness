@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile, unlink, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -95,6 +96,67 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   assert.equal(await check_export(exportDirectory, 'fixture'), true)
   assert.equal(await check_export(exportDirectory, 'live'), false)
   const workspace = JSON.parse(await readFile(join(exportDirectory, 'workspace.json'), 'utf8'))
+  assert.equal(manifest.export_format_version, 'study-export-v3')
+  assert.equal(manifest.student_practice_format, 'study-student-v1')
+  assert.equal(manifest.student_pages.length, workspace.payload.students.length * workspace.payload.nodes.length)
+  const studentPath = join(exportDirectory, 'student-pages', 'S1%3AM1.html')
+  const studentPage = await readFile(studentPath, 'utf8')
+  assert.ok(studentPage.includes('const STUDENT_PRACTICE ='))
+  assert.ok(!studentPage.includes('const WORKSPACE ='))
+  assert.ok(!studentPage.includes('"student_id":"S2"'))
+  const manifestPath = join(exportDirectory, 'manifest.json')
+  const savedManifest = await readFile(manifestPath, 'utf8')
+  await writeFile(studentPath, await readFile(join(exportDirectory, 'student-pages', 'S2%3AM1.html'), 'utf8'))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false, 'A different student page cannot replace the intended student.')
+  const polluted = `${studentPage}<script>const unrelatedAnswer="PRIVATE_TEACHER_SENTINEL"</script>`
+  await writeFile(studentPath, polluted)
+  const tamperedManifest = JSON.parse(savedManifest)
+  tamperedManifest.student_pages.find((page: { path: string }) => page.path === 'student-pages/S1%3AM1.html').sha256 = createHash('sha256').update(polluted).digest('hex')
+  await writeFile(manifestPath, JSON.stringify(tamperedManifest))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false, 'Updating a checksum must not legitimize extra student-page data.')
+  await writeFile(studentPath, studentPage)
+  await writeFile(manifestPath, JSON.stringify({ ...manifest, student_pages: [] }))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false, 'Missing student entries are an incomplete export.')
+  await writeFile(manifestPath, JSON.stringify({ ...manifest, export_format_version: 'study-export-v2' }))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+  await writeFile(manifestPath, savedManifest)
+  await unlink(studentPath)
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+  await writeFile(studentPath, studentPage)
+  assert.equal(await check_export(exportDirectory, 'fixture'), true)
+  const workspacePath = join(exportDirectory, 'workspace.json')
+  const savedWorkspace = await readFile(workspacePath, 'utf8')
+  for (const kind of ['nodes', 'students'] as const) {
+    const reduced = JSON.parse(savedWorkspace)
+    const removed = reduced.payload[kind].pop()
+    const removedPages = manifest.student_pages.filter((page: { student_id: string; node_id: string; path: string }) =>
+      kind === 'nodes' ? page.node_id === removed.node_id : page.student_id === removed.student_id)
+    assert.ok(removedPages.length > 0)
+    const savedPages: Array<[string, string]> = []
+    for (const page of removedPages) {
+      const path = join(exportDirectory, page.path)
+      savedPages.push([path, await readFile(path, 'utf8')])
+      await unlink(path)
+    }
+    await writeFile(workspacePath, JSON.stringify(reduced))
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, student_pages: manifest.student_pages.filter((page: { path: string }) =>
+      !removedPages.some((removedPage: { path: string }) => removedPage.path === page.path)) }))
+    assert.equal(await check_export(exportDirectory, 'fixture'), false, `Removing ${kind} from the display list cannot legitimize missing student pages.`)
+    await writeFile(workspacePath, savedWorkspace)
+    await writeFile(manifestPath, savedManifest)
+    for (const [path, content] of savedPages) await writeFile(path, content)
+  }
+  for (const mutate of [
+    (value: typeof workspace) => { value.payload.students[0].class_id = 'DIFFERENT-CLASS' },
+    (value: typeof workspace) => { value.payload.nodes[0].description = 'Different node scope' },
+  ]) {
+    const changed = JSON.parse(savedWorkspace)
+    mutate(changed)
+    await writeFile(workspacePath, JSON.stringify(changed))
+    assert.equal(await check_export(exportDirectory, 'fixture'), false, 'Display metadata must match the input projection.')
+  }
+  await writeFile(workspacePath, savedWorkspace)
+  assert.equal(await check_export(exportDirectory, 'fixture'), true)
   for (const file of ['manifest.json', 'workspace.json', 'acceptance.json', 'fields.json', 'students/S1%3AM1.json', 'classes/C1%3AM1.json', 'class-plans/C1%3AM1.json', 'node-pairings/student%3AS1%3AM1%3AM2.json']) {
     const path = join(exportDirectory, file), original = await readFile(path, 'utf8')
     for (const bad of [undefined, 'not-a-date', '2026-02-30T00:00:00.000Z', '2000-01-01T00:00:00.000Z']) {
