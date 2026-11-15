@@ -76,3 +76,15 @@
 - 最终设置本地输入目录执行 `npm run study:test`：模块构建、严格类型检查通过，数据36项与其他业务/集成107项，共143项通过、0失败、0跳过。新增与调整的回归包含21组数学核验、16组诊断/跨模块用例，以及既有错误定位用例。独立复核另检查95组合法变形和11个已发现的语境风险，其中10个满分风险案例经过统一管线后均保留有效；这些是定向证据，不代表任意数学或自然语言过程均能识别。
 - 构建后CLI已导出更新正式报告 `tmp/study-data/reports/diagnosis-coverage-01` 和自编演示 `tmp/study-data/public-demo-diagnosis-01/report`，完整性标记与自动引用核验通过。正式报告仍为 `needs_review`，不冒称教师或指定队员真人验收完成。源码、文档与合成测试提交Git，原始资料、报告、依赖及构建产物保持忽略；本轮无依赖安装。
 - 变更文档的8个本地链接及空白检查通过。尝试 `npm run doc-sync`，因Harness根开发依赖中的 `tsx` 未安装而无法启动；未安装全仓依赖，不将该检查记为通过。本轮未修改页面布局，现有离线DOM交互回归通过，实际浏览器视觉复验及真人教学审核仍待完成。此前跨分支XA-101至XA-113继续按原审查清单追踪，本轮未合并队友分支或一并修复这些独立问题。
+
+## 2026-11-15 wangzhenyu分支复验
+
+- 本轮冻结远程 `wangzhenyu@a40971436f`，与上次 `5f2b37d342` 逐路径比较：仅修改 `CROSS_ACCEPTANCE.md` 并新增 `docs/diagnosis-cross-acceptance-wang-zhenyu.md`，业务源码、测试、依赖声明及CI无变化。隔离工作树为 `tmp/team-review/wangzhenyu-retest-20261115`，复用已有依赖，无安装、业务修改或分支合并。以下结论针对该分支实际代码，不把其他分支的后续变更视为已同步。
+- 当前分支构建与严格类型检查通过。设置本地原包及既有Python对拍基线后运行 `npm run study:test`，数据39项、其他业务71项，共110项通过、0失败、0跳过；独立JS现有测试5/5通过。本轮未重复完整Python测试套件，旧Windows编码失败记录仍仅作为上轮证据，不冒称本轮全量Python通过。
+- 上轮XA-101至XA-113均未修复。XA-101、102、109、110已在新head纯合成实跑：纠正主题后个人/班级口径仍分叉且有效证据被核验拒绝；纠正为满分后仍被判失分；摘要仍夸大指标覆盖；constructor/toString指标仍使计划或提示崩溃。准确位置维持 `comparison/core.ts:291`、`app/verify.ts:81`、`diagnosis/core.ts:168`、`guidance/core.ts:147/168`、`guidance/knowledge.ts:131` 与 `guidance/core.ts:67`。
+- XA-103、104、111已在新head纯合成实跑：新版正确0分仍被按固定记录编号改成1；跨节点统计、他人证据及不存在材料仍可进入计划并通过验证；固定提示仍直接给出题目所问关系。位置为独立交付包的 `scripts/build-deliverable.mjs:100/153`、`src/recommendation-engine.mjs:308/443`、`src/knowledge-base.mjs:44`。
+- XA-105、106、107、108已用6套既有合成CSV分别经新head的TS/Python真实API运行，共12次求值：Python仍允许范围外题纠正计分、未知评分点/单点超限/负分进入统计，以及按原满分判断修复；TS仍在满分纠正后保留失效的越界标记，排除本应有效的2/3。位置维持 `competition/src/study_companion/clean.py:209-215/229-239`、`load.py:142-150`、`modules/data/core.ts:192-193/236-240`。
+- XA-112、113通过当前代码静态复核：CI仍未调用独立JS测试；验收脚本仍吞导出退出码并只看index。XA-113沿用上轮“CLI部分导出有index、无manifest”的合成产物证据，本轮未执行整条 `verify.sh`，仅确认现有判据会误记通过。位置为 `.github/workflows/study-companion.yml:36` 和 `modules/verify.sh:94-95`。合成复验脚本保留于 `tmp/team-review/retest-20261115`，不提交数据或产物。
+- 新增文档观察：新验收报告的代表案例与首错分析段提交了原包的具体作答、分数和诊断内容；已确认该文件无需登录即可公开读取。它与本分支 `modules/README.md` 及 `.agents/skills/study-companion/SKILL.md` 的赛事资料/派生结果仅本地保存约束冲突。建议受限明细移回忽略目录，公开验收记录仅留方法、一般状态和自编示例。本日志不复制该文档的具体原包内容。
+- 分支区别：同时观察到 `master@7d56d09d30` 已有统一导出、旧入口委托及其他后续提交，`wangzhenyu` 尚未包含；本轮只确认差异，不对master作整体验收结论。结论仍为不建议当前wangzhenyu整体验收通过，需在明确修复并同步后的新快照复验；现有测试通过与原包对拍通过不覆盖上述补充异常用例。
+- 本轮复现工具一次将URL pathname误当Windows本地路径，在 `D:/vs%20code%20%E5%BA%93/%E6%99%BA%E6%85%A7%E5%AD%A6%E4%BC%B4/tmp/team-review/retest-20261115/standalone-1794741471964` 生成仅含自编合成资料的临时目录。脚本已改用 `fileURLToPath` 并在正确忽略目录重跑成功；迁移及逐项清理自建空父目录的命令在执行前被自动审批拒绝，理由仅为 `blocked by policy`，未重试等价迁移/删除，该临时目录暂留。队友业务源码和原始资料未改。
