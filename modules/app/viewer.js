@@ -138,7 +138,8 @@ function vTable(columns, rows, emptyMessage = '当前范围没有记录。') {
 }
 
 function vDownload(value, filename) {
-  const url = URL.createObjectURL(new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json;charset=utf-8' }))
+  const csv = filename.endsWith('.csv')
+  const url = URL.createObjectURL(new Blob([csv ? result_to_csv(value) : `${JSON.stringify(value, null, 2)}\n`], { type: csv ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }))
   const anchor = vEl('a')
   anchor.href = url
   anchor.download = filename
@@ -287,7 +288,7 @@ function vStudentPlan(item) {
         success_criteria: activity.success_criteria, next_if_success: activity.next_if_success, next_if_not: activity.next_if_not,
         hints: Object.fromEntries(activity.item_ids.map(id => [id, (item.hints[id] ?? []).map(hint => ({ level: hint.payload.level, hint: hint.payload.hint }))])),
       })),
-    }, limitations: ['学生练习清单不包含原始答案、参考答案、解答过程或分点评分。'],
+    }, evidence_ids: [], limitations: ['学生练习清单不包含原始答案、参考答案、解答过程或分点评分。'],
   }
 }
 
@@ -300,7 +301,8 @@ function vPlan() {
   vMain.append(vEl('div', 'plan-intro', vEl('div', '', vEl('p', 'eyebrow', '当前建议类型'), vEl('h2', '', vKindNames[item.plan.payload.plan_type]),
     vEl('p', 'muted', `证据状态：${certaintyNames[item.plan.payload.certainty] ?? '证据不足'} · ${item.plan.payload.summary ?? '本地规则根据当前节点已有记录生成。'}`),
     item.plan.payload.evidence_gaps?.length ? vEl('p', 'muted', `补充观察：${item.plan.payload.evidence_gaps.map(gap => gap.indicator_id).join('、')}`) : null),
-    vButton('导出学生练习清单', () => vDownload(vStudentPlan(item), `${vState.student}-${vState.node}-student-plan.json`), 'button button-primary')))
+    vButton('导出学生练习清单', () => vDownload(vStudentPlan(item), `${vState.student}-${vState.node}-student-plan.json`), 'button button-primary'),
+    vButton('导出学生练习 CSV', () => vDownload(vStudentPlan(item), `${vState.student}-${vState.node}-student-plan.csv`))))
   if (!item.plan.payload.activities.length) vMain.append(vEmpty('诊断未完成或缺少合适材料，暂未生成活动。请先查看处理说明。'))
   const firstIds = new Set(item.plan.payload.delivery?.first_activity_ids ?? item.plan.payload.activities.map(activity => activity.activity_id))
   const firstActivities = item.plan.payload.activities.filter(activity => firstIds.has(activity.activity_id))
@@ -432,7 +434,7 @@ function vClasses() {
       vEl('p', 'muted', `可选题目：${recommendation.item_ids.join('、')} · 材料：${recommendation.material_ids.join('、') || '未提供'}`),
       vEl('p', '', `观察：${recommendation.observation}`), vEl('p', '', `调整条件：${recommendation.adjust_when}`),
       vEvidenceLinks(recommendation.evidence_ids)))))
-    vMain.append(vButton('导出班级教学建议', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.json`)), vLimitations(plan))
+    vMain.append(vButton('导出班级教学建议', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.json`)), vButton('导出班级建议 CSV', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.csv`)), vLimitations(plan))
   }
   vMain.append(vPanel('学生记录概况', '点击学生查看其诊断，空记录保持未知。', vTable([
     { label: '学生', render: row => vButton(row.student_id, () => vShow('diagnosis', row.student_id), 'text-button') },
@@ -558,7 +560,7 @@ function vStart() {
   vNodeDescription = vEl('p', 'node-description')
   const toolbar = vEl('header', 'topbar', vEl('div', 'title-block', vEl('p', 'eyebrow', '教师工作台 · 本地报告'), vPageTitle),
     vEl('div', 'toolbar-controls', vStudentLookup(), studentField.wrapper, nodeField.wrapper,
-      vButton('打印当前页', () => window.print()), vButton('导出当前 JSON', () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.json`), 'button button-primary')))
+      vButton('打印当前页', () => window.print()), vButton('导出当前 CSV', () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.csv`)), vButton('导出当前 JSON', () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.json`), 'button button-primary')))
   vMain = vEl('main', 'main-content')
   const fixture = WORKSPACE.source_mode === 'fixture'
   const source = vEl('div', `data-source-banner ${fixture ? 'source-fixture' : 'source-live'}`,

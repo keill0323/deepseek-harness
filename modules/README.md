@@ -25,7 +25,9 @@ npm run study:demo -- --out tmp/study-data/demo-01
 npm run study:export -- --data tmp/study-data/input --out tmp/study-data/reports/run-01 --summary-only
 ```
 
-导出包含本地交互页面 `index.html`、全量结果 `workspace.json`、每名学生每个测验的 `students/*.json`、各班各节点的 `classes/*.json`、班级教学建议 `class-plans/*.json`、字段说明 `fields.json`、自动核验 `acceptance.json` 和完整性标记 `manifest.json`。`manifest.json` 最后写入；没有该文件表示导出未完成。`node modules/app/check-export.ts <导出目录> live` 可重新核对版本、范围、证据、每份子报告与 HTML 的 SHA-256；合成报告将最后的参数改为 `fixture`。缺文件、内容不一致或摘要错误均以非零退出码失败。程序自动核验通过不等于任务书要求的非作者队员真人复验。
+导出包含本地交互页面 `index.html`、全量结果 `workspace.json`、每名学生每个测验的 `students/*.json`、各班各节点的 `classes/*.json`、班级教学建议 `class-plans/*.json`、同源 `csv/`、字段说明 `fields.json`、自动核验 `acceptance.json` 和完整性标记 `manifest.json`。CSV 包含总览、课程、质量记录、逐学生逐节点的统计/诊断/计划/同伴比较/学生提示，以及班级报告和教学建议；所有内容直接投影同一结果，不重新计算。`manifest.json` 最后写入；没有该文件表示导出未完成。`node modules/app/check-export.ts <导出目录> live` 核对版本、范围、证据、子报告、全部 CSV 与 JSON 的逐字段内容及 HTML 的 SHA-256；合成报告将最后的参数改为 `fixture`。缺失、篡改或不一致均返回非零退出码。当前导出格式为 `study-export-v2`，旧报告需在新目录重新导出后才能通过此完整性检查。自动核验不替代非作者队员真人复验。
+
+CSV 使用 UTF-8 BOM、逗号和 CRLF；按 `path`（payload 内的 JSON Pointer）定位每个对象或数组，`value/` 列展示直接字段，`row_type` 和 `length` 保留容器类型与数组长度。`types_json` 区分未知 `null`、真实数值 `0` 和空字符串；空单元格只表示该行不含此列。版本、状态及请求范围随行保留，根行记录总证据与限制。可能被表格软件识别为公式的文本添加一个单引号，`escaped_columns_json` 明确列出还原时应去掉此前缀的列；真正的负数保持数值。用表格软件导入时将编号列指定为文本，避免前导零被自动转换。完整字段解释见导出的 `fields.json`。
 
 赛事原始数据和派生报告保留在被 Git 忽略的 `tmp/study-data` 中，不随代码推送。不要将正式报告上传公网或提供给远程模型。界面展示是本地教师工具，未实现生产环境账户与权限体系。
 
@@ -40,6 +42,8 @@ npm run study:export -- --data tmp/study-data/input --out tmp/study-data/reports
 
 报告可切换学生和测验、比较任意两名学生或两个班、查看课程引用和复核队列，点击证据编号可核对原始作答、过程及分点评分。教师备注只记录本人的观察，不改变输入评分或诊断事实。学习计划默认显示学生提示，选择“教师核对”后可展开参考答案、解析和评分依据；学生练习清单导出不包含教师答案和原始作答。整份 HTML、workspace 和学生案例 JSON 仍是教师报告，不能当成学生专用文件分发。
 
+页面“导出当前 CSV”与“导出当前 JSON”使用当前选定的同一结果；两人、两班比较及筛选后的质量队列不会回退到默认范围。学生练习 CSV 与 JSON 共用白名单，班级建议也提供两种格式；当前结果 CSV 和完整 `csv/` 目录仍属于本地教师材料。
+
 学习计划优先处理能定位到原作答步骤的错误，首轮最多安排3项，其余活动保留在后续阶段，教师核对新作答与实际提示等级后再决定是否进入下一阶段。已有满分记录优先匹配同指标未尝试题；没有新题时要求解释与检验，不把重复填答案当成迁移。
 
 学生搜索支持按 `/` 聚焦、输入编号或班级关键词后按Enter定位；多个匹配时要求进一步选择，不擅自切换对象。质量队列可按当前学生、节点和关键词过滤，导出范围随筛选收窄。提示等级按学生、节点和题目在当前会话内保留，切页后不会丢失；关闭页面不会把这些操作保存为新的学习证据。打印按钮只打印当前页面。
@@ -51,6 +55,10 @@ npm run study:export -- --data tmp/study-data/input --out tmp/study-data/reports
 ```powershell
 node modules/app/cli.ts run --data tmp/study-data/input --operation get_student_stats --request-file request.json --out tmp/study-data/requests/result-01.json --summary-only
 ```
+
+单项请求默认 JSON；追加 `--format csv` 并使用新的 `.csv` 输出路径即可导出同范围 CSV。两人和两班比较同样适用。`--summary-only` 继续只返回状态与路径，两种格式均拒绝覆盖现有文件。
+
+原 `competitions/smart-learning-companion/wang-zhenyu/scripts/build-deliverable.mjs` 已改为此统一导出的兼容入口，不再按固定记录编号改分、调整节点或重新生成另一套计划；`build-example.mjs` 使用同一合成输入生成器。旧入口的输出目录改为上述标准布局，旧的 `成果包/`、`demo/data.js` 和手工 `--generated-at` 参数不再生成或接受，详见该模块 README。
 
 `--summary-only` 仅向调用者返回状态、操作名和本地文件路径，完整结果写入本地；单项操作使用该选项时必须指定 `--out`。直接面向本地用户调试时可以省略该选项以打印 JSON。支持的操作见 `node modules/app/cli.ts --help`。未知字段、错误类型、未知编号和超出节点范围的题目会显式失败，不忽略条件后扩大请求。
 

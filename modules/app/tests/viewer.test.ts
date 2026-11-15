@@ -7,6 +7,8 @@ import type { DatasetInput } from '../../data/types.ts'
 import { build_workspace } from '../core.ts'
 import { make_demo_input } from '../demo.ts'
 import { prepare_workspace_dataset } from '../pipeline.ts'
+import { csv_payload } from './csv-helpers.ts'
+import { parse_csv } from '../../data/io.ts'
 
 type DownloadBlob = InstanceType<Window['Blob']>
 interface Download { filename: string; blob: DownloadBlob }
@@ -44,8 +46,9 @@ async function setup(t: TestContext, input: DatasetInput = make_demo_input(), so
   })
   const calls = { students: 0, peers: 0, classes: 0, classAnalysis: 0 }
   Object.defineProperty(window, '__comparisonCalls', { value: calls })
-  const [comparison, viewer] = await Promise.all([
+  const [comparison, csv, viewer] = await Promise.all([
     readFile(new URL('../../data/lib/companion/comparison/core.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../data/lib/companion/app/csv.js', import.meta.url), 'utf8'),
     readFile(new URL('../viewer.js', import.meta.url), 'utf8'),
   ])
   assert.ok(!/^import\s/m.test(comparison), 'The offline report must use its dependency-free comparison artifact.')
@@ -59,7 +62,7 @@ compare_classes = (...args) => { globalThis.__comparisonCalls.classes += 1; retu
 const originalClassAnalysis = analyze_class;
 analyze_class = (...args) => { globalThis.__comparisonCalls.classAnalysis += 1; return originalClassAnalysis(...args); };
 `
-  window.eval(`${comparison.replace(/^export\s+/gm, '')}\n${wrapped}\nconst WORKSPACE = ${JSON.stringify(workspace)};\n${viewer}`)
+  window.eval(`${comparison.replace(/^export\s+/gm, '')}\n${csv.replace(/^export\s+/gm, '')}\n${wrapped}\nconst WORKSPACE = ${JSON.stringify(workspace)};\n${viewer}`)
   return { window, workspace, downloads, calls, networkRequests: () => networkRequests }
 }
 
@@ -81,6 +84,40 @@ function choose(window: Window, label: string, value: string): void {
 function mainText(window: Window): string {
   return window.document.querySelector('main')?.textContent ?? ''
 }
+
+test('current CSV matches the selected JSON after comparison and class scope changes', async t => {
+  const { window, downloads } = await setup(t)
+  for (const view of ['比较分析', '班级报告', '课程依据', '质量复核']) {
+    click(window, view)
+    if (view === '比较分析') { choose(window, '比较方式', 'classes'); choose(window, '测验节点', 'CHECK-1') }
+    if (view === '班级报告') choose(window, '选择班级', 'GROUP-B')
+    click(window, '导出当前 JSON')
+    const json = JSON.parse(await downloads.at(-1)!.blob.text())
+    click(window, '导出当前 CSV')
+    const csv = await downloads.at(-1)!.blob.text()
+    assert.equal(downloads.at(-1)!.blob.type, 'text/csv;charset=utf-8')
+    assert.deepEqual(csv_payload(csv), json.payload)
+    assert.deepEqual(JSON.parse(parse_csv(csv, 'selected.csv')[0]!['scope_json']!), json.scope)
+    if (view === '班级报告') {
+      click(window, '导出班级教学建议')
+      const plan = JSON.parse(await downloads.at(-1)!.blob.text())
+      click(window, '导出班级建议 CSV')
+      assert.deepEqual(csv_payload(await downloads.at(-1)!.blob.text()), plan.payload)
+    }
+  }
+})
+
+test('student practice CSV uses the same whitelist as JSON even after opening teacher solutions', async t => {
+  const { window, downloads } = await setup(t)
+  click(window, '学习计划')
+  choose(window, '内容模式', 'teacher')
+  click(window, '导出学生练习清单')
+  const json = JSON.parse(await downloads.at(-1)!.blob.text())
+  click(window, '导出学生练习 CSV')
+  const csv = await downloads.at(-1)!.blob.text()
+  assert.deepEqual(csv_payload(csv), json.payload)
+  for (const privateValue of ['teacher_solution', 'reference_answer', 'original_values', 'z>-3', 'z<-3', '评分点得分']) assert.ok(!csv.includes(privateValue))
+})
 
 test('offline teacher report navigates seven pages without loading external resources', async t => {
   const { window, networkRequests } = await setup(t)

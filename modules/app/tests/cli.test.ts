@@ -10,6 +10,7 @@ import { build_workspace } from '../core.ts'
 import { render_report } from '../report.ts'
 import { check_export } from '../check-export.ts'
 import { make_input } from '../../data/tests/helpers.ts'
+import { csv_payload } from './csv-helpers.ts'
 
 const builtCli = fileURLToPath(new URL('../../data/lib/companion/app/cli.js', import.meta.url))
 
@@ -62,6 +63,23 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   assert.equal(JSON.parse(await readFile(join(exportDirectory, 'manifest.json'), 'utf8')).status, 'complete')
   assert.equal(await check_export(exportDirectory, 'fixture'), true)
   assert.equal(await check_export(exportDirectory, 'live'), false)
+  const workspace = JSON.parse(await readFile(join(exportDirectory, 'workspace.json'), 'utf8'))
+  const csvPath = join(exportDirectory, 'csv', 'students', 'S1%3AM1', 'statistics.csv')
+  const csv = await readFile(csvPath, 'utf8')
+  assert.deepEqual(csv_payload(csv), workspace.payload.cases['S1:M1'].statistics.payload)
+  assert.ok(manifest.csv_files.includes('csv/students/S1%3AM1/statistics.csv'))
+  await writeFile(csvPath, csv.replace('"study-csv-v1"', '"wrong-version"'))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+  await unlink(csvPath)
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+  await writeFile(csvPath, csv)
+  assert.equal(await check_export(exportDirectory, 'fixture'), true)
+  const selectedCsv = join(directory, 'selected.csv')
+  const csvRequest = ['run', '--data', directory, '--operation', 'get_student_stats', '--request', '{"student_id":"S1","node_id":"M1"}', '--out', selectedCsv, '--format', 'csv', '--summary-only', '--fixture']
+  assert.equal(run(csvRequest).status, 0)
+  assert.equal(await readFile(selectedCsv, 'utf8'), csv)
+  assert.equal(run(csvRequest).status, 1, 'CSV exports must refuse overwriting')
+  assert.equal(run(['run', '--data', directory, '--operation', 'get_student_stats', '--format', 'xml', '--summary-only', '--out', selectedCsv]).status, 1)
   await writeFile(join(exportDirectory, 'index.html'), '<!doctype html><html>incomplete</html>')
   assert.equal(await check_export(exportDirectory, 'fixture'), false)
   await writeFile(join(exportDirectory, 'index.html'), html)
