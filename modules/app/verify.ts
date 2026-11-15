@@ -106,7 +106,12 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
       if (hint.payload.item_id !== itemId || hint.payload.student_id !== expected.student_id || hint.payload.node_id !== expected.node_id) errors.push(`${key}: 提示内容对象不同`)
       ownEvidence(hint.evidence_ids, expected.student_id, expected.node_id, key)
       if (hint.payload.mode !== 'student' || hint.payload.teacher_solution !== undefined) errors.push(`${key}: 学生提示包含教师答案字段`)
-      if (hint_leaks_answer(hint.payload.hint, materials.get(itemId)?.['参考答案'] ?? '')) errors.push(`${key}: 学生提示泄露题目结论或答案`)
+      const trustedAnswer = entry.teacher_hints[itemId]?.payload.teacher_solution?.reference_answer?.trim() ?? ''
+      if (!trustedAnswer) {
+        errors.push(`${key}: 缺少可信参考答案，无法核验学生提示`)
+      } else if (hint_leaks_answer(hint.payload.hint, trustedAnswer)) {
+        errors.push(`${key}: 学生提示泄露题目结论或答案`)
+      }
     }
     for (const activity of entry.plan.payload.activities) for (const itemId of activity.item_ids) {
       const hints = entry.hints[itemId]

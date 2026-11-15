@@ -725,7 +725,7 @@ export function validatePlan(plan, context = {}) {
     errors.push('计划目标节点与验证上下文不一致');
   }
 
-  const sourceEvidence = context.evidence.map(normalizeEvidenceItem);
+  const sourceEvidence = collapseEvents(context.evidence);
   const sourceContextErrors = validateEvidenceContext(
     context.student.id,
     sourceEvidence,

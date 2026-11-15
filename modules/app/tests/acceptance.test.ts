@@ -79,6 +79,7 @@ test('class guidance separates scored loss, full evidence and observation withou
 test('export verification rejects missing teacher content, class plans and foreign or reviewed evidence', () => {
   const input = make_input([make_record(), make_record({ 记录编号: 'R2', 作答事件编号: 'E2', 学生编号: 'S3' })])
   const base = build_workspace(prepare_workspace_dataset(input, { source_mode: 'fixture' }))
+  assert.ok(base.payload.browser_snapshot.input.items.every(item => !('参考答案' in item) && !('参考解析' in item) && !('评分点' in item)))
   assert.equal(verify_workspace(base).status, 'passed')
   const mutations: Array<(workspace: typeof base) => void> = [
     workspace => { delete workspace.payload.class_plans['C1:M1'] },
@@ -88,6 +89,17 @@ test('export verification rejects missing teacher content, class plans and forei
     workspace => { workspace.payload.class_plans['C1:M1']!.payload.recommendations[0]!.evidence_ids = ['R2'] },
     workspace => { workspace.payload.class_plans['C1:M1']!.payload.recommendations[0]!.item_ids = ['A2'] },
     workspace => { workspace.payload.browser_snapshot.current[0]!.action = 'review' },
+    workspace => {
+      const entry = workspace.payload.cases['S1:M1']!
+      const itemId = Object.keys(entry.teacher_hints)[0]!
+      const answer = entry.teacher_hints[itemId]!.payload.teacher_solution!.reference_answer
+      entry.hints[itemId]![0]!.payload.hint = `答案：${answer}`
+    },
+    workspace => {
+      const entry = workspace.payload.cases['S1:M1']!
+      const itemId = Object.keys(entry.teacher_hints)[0]!
+      entry.teacher_hints[itemId]!.payload.teacher_solution!.reference_answer = ''
+    },
   ]
   for (const mutate of mutations) {
     const copy = structuredClone(base)

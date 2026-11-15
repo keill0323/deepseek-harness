@@ -224,8 +224,10 @@ def detect_issues(vr: ValidRecord, dataset: Dataset,
             issues.append(ISSUE_SCORE_EXCEEDS_FULL)
         rubric = question.scoring_points if question is not None else []
         rubric_by_id = {point.point_id: point.score for point in rubric}
-        point_scores_invalid = bool(rubric) and (
-            len(rubric_by_id) != len(rubric)
+        point_scores_invalid = (
+            row.point_scores_invalid
+            or bool(row.point_scores) != bool(rubric)
+            or len(rubric_by_id) != len(rubric)
             or set(row.point_scores) != set(rubric_by_id)
             or any(
                 value < 0 or value > rubric_by_id.get(point_id, -1)

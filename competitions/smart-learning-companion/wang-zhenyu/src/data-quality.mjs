@@ -11,13 +11,29 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-export function parsePointScoreEntries(value) {
+export function parsePointScoreAudit(value) {
   const entries = [];
-  for (const match of String(value ?? '').matchAll(/([^\s=；;]+)\s*=\s*(-?\d+(?:\.\d+)?)/g)) {
+  let invalid = false;
+  for (const part of String(value ?? '').split(/[；;\n]/)) {
+    const text = part.trim();
+    if (!text) continue;
+    const match = /^([^\s=]+)\s*=\s*(-?\d+(?:\.\d+)?)$/.exec(text);
+    if (!match?.[1] || !match[2]) {
+      invalid = true;
+      continue;
+    }
     const score = Number(match[2]);
-    if (match[1] && Number.isFinite(score)) entries.push({ point_id: match[1], score });
+    if (!Number.isFinite(score) || entries.some((entry) => entry.point_id === match[1])) {
+      invalid = true;
+      continue;
+    }
+    entries.push({ point_id: match[1], score });
   }
-  return entries;
+  return { entries, invalid };
+}
+
+export function parsePointScoreEntries(value) {
+  return parsePointScoreAudit(value).entries;
 }
 
 export function parsePointScoreValues(value) {
@@ -88,15 +104,16 @@ export function auditRecord(record, question, node) {
   const topicId = record['主题编号'] ?? record.topic_id;
   const studentAnswer = record['学生最终作答'] ?? record.answer ?? '';
   const referenceAnswer = question?.['参考答案'] ?? question?.answer ?? '';
-  const pointEntries = parsePointScoreEntries(record['评分点得分'] ?? record.point_scores);
+  const pointAudit = parsePointScoreAudit(record['评分点得分'] ?? record.point_scores);
+  const pointEntries = pointAudit.entries;
   const pointValues = pointEntries.map((entry) => entry.score);
   const pointSum = pointValues.length ? pointValues.reduce((sum, value) => sum + value, 0) : null;
   const rubricText = question?.['评分点'] ?? question?.scoring_rubric ?? null;
   const rubricMaximums = rubricText === null ? null : parseRubricMaximums(rubricText);
-  let invalidPointScores = false;
+  let invalidPointScores = pointAudit.invalid;
   if (status === '已评分' && rubricText !== null) {
     const pointIds = pointEntries.map((entry) => entry.point_id);
-    invalidPointScores = !rubricMaximums
+    invalidPointScores = pointAudit.invalid || !rubricMaximums
       || new Set(pointIds).size !== pointIds.length
       || new Set(pointIds).size !== rubricMaximums.size
       || pointIds.some((pointId) => !rubricMaximums.has(pointId))

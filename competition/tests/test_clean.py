@@ -247,3 +247,21 @@ def test_invalid_and_negative_point_scores_are_excluded(tmp_path):
         assert vr.stats_flag == FLAG_EXCLUDED
         assert vr.effective_score is None
     assert ISSUE_SCORE_NEGATIVE in by_id["XR0404"].issues
+
+
+def test_duplicate_malformed_and_rubricless_points_are_excluded(tmp_path):
+    by_id = _load_with_appended_records(tmp_path, [
+        "XR0500,E05,QX08,T03,EN02,E05-EN02-QX08-A,1,"
+        "2026-06-17T12:20:00+08:00,已评分,3,3,x<2,,"
+        "QX08P1=-10；QX08P1=1；QX08P2=1；QX08P3=0",
+        "XR0501,E05,QX08,T03,EN02,E05-EN02-QX08-B,1,"
+        "2026-06-17T12:25:00+08:00,已评分,3,3,x<2,,"
+        "QX08P1=1；QX08P2=1；QX08P3=1；not_a_pair",
+        "XR0502,E05,QX01,T01,EN01,E05-EN01-QX01-C,1,"
+        "2026-01-20T12:30:00+08:00,已评分,1,1,A,,NOT_A_POINT=1",
+    ])
+    for record_id in ["XR0500", "XR0501", "XR0502"]:
+        vr = by_id[record_id]
+        assert ISSUE_INVALID_POINT_SCORES in vr.issues
+        assert vr.stats_flag == FLAG_EXCLUDED
+        assert vr.effective_score is None

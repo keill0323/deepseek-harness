@@ -100,6 +100,7 @@ class AnswerRow:
     solution_steps: List[str]
     point_scores: Dict[str, int]
     raw: Dict[str, str]
+    point_scores_invalid: bool = False
 
 
 @dataclass

@@ -6,6 +6,7 @@ study_companion 不同（面向原始 dict、无 dataclass、无分层），
 """
 
 import csv
+import re
 import unicodedata
 from collections import defaultdict
 from pathlib import Path
@@ -13,6 +14,38 @@ from pathlib import Path
 
 def _norm(text):
     return "".join(unicodedata.normalize("NFKC", text or "").split()).lower()
+
+
+def _points(text):
+    values = {}
+    invalid = False
+    for part in re.split(r"[；;\n]", text or ""):
+        part = part.strip()
+        if not part:
+            continue
+        match = re.fullmatch(r"([^=\s]+)\s*=\s*([+-]?\d+)", part)
+        if not match:
+            invalid = True
+            continue
+        key, value = match.group(1), int(match.group(2))
+        if key in values:
+            invalid = True
+            continue
+        values[key] = value
+    return values, invalid
+
+
+def _rubric(text):
+    values = {}
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = re.fullmatch(r"(\S+)\s+.+?\s+(\d+)\s*分", line)
+        if not match or match.group(1) in values:
+            return None
+        values[match.group(1)] = int(match.group(2))
+    return values
 
 
 def load_raw(data_dir: Path):
@@ -49,17 +82,33 @@ def analyze(data_dir: Path, repair_consistent_points: bool = False):
         if b and b["主题编号"] and r["主题编号"] != b["主题编号"]:
             issues.append("theme_mismatch")
             theme = b["主题编号"]
-        # 规则三：得分超出满分、总分与评分点合计不一致——不能进统计
+        # 规则三：得分范围、评分点来源与总分一致性——按题库权威满分判断
         sc = int(r["得分"]) if r["得分"] else None
-        full = int(r["满分"]) if r["满分"] else None
+        recorded_full = int(r["满分"]) if r["满分"] else None
+        bank_full = int(b["满分"]) if b and b["满分"] else None
+        full = bank_full if bank_full is not None else recorded_full
+        if b and recorded_full is not None and bank_full is not None and recorded_full != bank_full:
+            issues.append("full_score_mismatch_bank")
+        pts, malformed_points = _points(r["评分点得分"])
+        rubric = _rubric(b["评分点"]) if b else None
+        rubric = rubric or {}
+        pts_sum = sum(pts.values())
+        invalid_points = (
+            malformed_points
+            or (bool(pts) != bool(rubric))
+            or set(pts) != set(rubric)
+            or any(value < 0 or value > rubric.get(point_id, -1)
+                   for point_id, value in pts.items())
+        )
         if r["评分状态"] == "已评分" and sc is not None:
+            if sc < 0:
+                issues.append("score_negative")
             if full is not None and sc > full:
                 issues.append("score_exceeds_full")
-            if r["评分点得分"]:
-                pts = sum(int(p.split("=")[1]) for p in
-                          r["评分点得分"].split("；") if "=" in p)
-                if pts != sc:
-                    issues.append("total_points_mismatch")
+            if invalid_points:
+                issues.append("invalid_point_scores")
+            if pts and pts_sum != sc:
+                issues.append("total_points_mismatch")
         # 规则四：材料不在节点可用题集——不迁移节点，不进该节点统计
         if r["材料编号"] not in avail:
             issues.append("node_out_of_scope")
@@ -69,13 +118,14 @@ def analyze(data_dir: Path, repair_consistent_points: bool = False):
                 _norm(r["学生最终作答"]) == _norm(b["参考答案"])):
             issues.append("semantic_review")
         blocking = any(i in issues for i in (
-            "score_exceeds_full", "total_points_mismatch", "node_out_of_scope"))
-        # 差异化处置：得分超满分但评分点合计==满分 -> 以评分点合计为有效得分
+            "score_exceeds_full", "total_points_mismatch", "node_out_of_scope",
+            "invalid_point_scores", "score_negative"))
+        # 差异化处置：得分超满分但评分点合计==权威满分 -> 以评分点合计为有效得分
         effective = sc
         if ("score_exceeds_full" in issues and repair_consistent_points
-                and r["评分点得分"] and full is not None):
-            pts_sum = sum(int(p.split("=")[1]) for p in
-                          r["评分点得分"].split("；") if "=" in p)
+                and not invalid_points and "score_negative" not in issues
+                and "node_out_of_scope" not in issues
+                and pts and full is not None):
             if pts_sum == full:
                 issues.append("score_repaired_from_points")
                 effective = pts_sum

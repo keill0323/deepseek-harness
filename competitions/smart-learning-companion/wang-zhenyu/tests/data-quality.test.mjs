@@ -59,3 +59,18 @@ test('未知评分点不能作为自动纠分依据', () => {
   assert.equal(audit.scoreSource, 'review_required');
   assert.equal(audit.resolvedScore, null);
 });
+
+
+test('尾随非评分文本不能被当作有效评分片段', () => {
+  const question = {
+    ...q017,
+    '评分点': 'Q017P1 答案正确 1分',
+  };
+  const audit = auditRecord(rawRecord({
+    '记录编号': 'SYN-005',
+    '得分': '0',
+    '评分点得分': 'Q017P1=0junk',
+  }), question, n01);
+  assert.equal(audit.reviewRequired, true);
+  assert.ok(audit.issueCodes.includes('invalid_point_scores'));
+});

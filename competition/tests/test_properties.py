@@ -60,11 +60,16 @@ def generate_dataset(seed: int, out_dir: Path) -> Path:
        "课标整理编号", "课标文件页／正文页", "教材正文页"],
       [[f"PT{t:02d}", f"主题{t}", "目标", f"PT{t:02d}I1", "指标", "CR01", "1／1", "上册1"]
        for t in (1, 2, 3)])
+    def rubric_for(mid: str, qtype: str) -> str:
+        if qtype != "解答题":
+            return ""
+        return "\n".join(f"{mid}P{k} 步骤{k} 1分" for k in (1, 2, 3))
+
     w("题目与材料.csv",
       ["材料编号", "主题编号", "材料类型", "题型", "题干或内容", "选项",
        "参考答案", "参考解析", "满分", "评分点", "指标编号", "来源或资料文件"],
       [[mid, theme, "题目", qtype, f"题干{i}", "", ref, "", str(full),
-        "", f"{theme}I1", "合成"] for i, (mid, theme, qtype, full, ref)
+        rubric_for(mid, qtype), f"{theme}I1", "合成"] for i, (mid, theme, qtype, full, ref)
        in enumerate(questions, 1)])
     w("模拟学生.csv", ["学生编号", "模拟班级编号", "年级"],
       [[sid, cls, "7"] for sid, cls in students])

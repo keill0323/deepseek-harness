@@ -242,3 +242,19 @@ test('自编整除关系题的各级学生提示不泄露结论', () => {
     nodes: customNodes
   }), []);
 });
+
+
+test('验证上下文使用最高修订，不把合法历史版本误报为额外证据', () => {
+  const old = record({ revision: 1, status: '待评分', score: null, source_ref: 'XR023' });
+  const latest = record({ revision: 2, source_ref: 'XR023' });
+  const plan = buildLearningPlan({
+    student: { id: 'S01', class_id: 'SC01' },
+    evidence: [latest],
+    questions,
+    nodes: nodeScopes,
+    target_node_id: 'N02',
+    focus_indicator: 'T03I1',
+    review_item: 'SAMPLE-Q01'
+  }, '2026-11-14T12:00:00+08:00');
+  assert.deepEqual(validatePlan(plan, planContext(plan, [old, latest])), []);
+});
