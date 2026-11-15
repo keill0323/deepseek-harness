@@ -3,8 +3,7 @@ name: Study companion
 on:
   workflow_dispatch:
   push:
-    # Branch pushes remain a recovery path when a PR event produces no run.
-    branches: ['**']
+    branches: [keill, weiwenyu, master]
     paths:
       - 'modules/**'
       - 'competition/**'

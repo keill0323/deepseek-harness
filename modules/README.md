@@ -70,7 +70,7 @@ $env:STUDY_DATA_DIR = (Resolve-Path tmp/study-data/input).Path
 npm run study:test
 ```
 
-第一种运行只使用合成输入，私有数据测试明确跳过；第二种补跑真实数据基线及全链路检查。专用 GitHub Actions 工作流在所有分支的相关代码推送、PR 和手动运行时验证合成数据，不下载或上传官方数据。若 PR 没有生成运行记录，可从 Actions 手动选择该 PR 分支运行 Study companion；合并前核对运行的 head SHA 与 PR 最新提交相同。验证包括模块构建、严格类型检查、比较权重、修订归并、异常隔离、引用与版本一致、提示不泄露答案、导出防覆盖及构建后 CLI；它不等同于 Harness 全仓构建或完整模型会话。测试命令同时运行 `competitions/smart-learning-companion/wang-zhenyu/tests` 的指导交付物回归。
+第一种运行只使用合成输入，私有数据测试明确跳过；第二种补跑真实数据基线及全链路检查。专用 GitHub Actions 工作流在 keill、weiwenyu、master 分支的相关代码推送、PR 和手动运行时验证合成数据，不下载或上传官方数据。若 PR 没有生成运行记录，先确认仓库级 Actions 已启用，再从 Actions 手动选择该 PR 分支运行 Study companion；合并前核对运行的 head SHA 与 PR 最新提交相同。验证包括模块构建、严格类型检查、比较权重、修订归并、异常隔离、引用与版本一致、提示不泄露答案、导出防覆盖及构建后 CLI；它不等同于 Harness 全仓构建或完整模型会话。测试命令同时运行 `competitions/smart-learning-companion/wang-zhenyu/tests` 的指导交付物回归。
 
 macOS/Linux 可运行 `STUDY_DATA_DIR="本地CSV目录" sh modules/verify.sh` 一次完成 Python 参考实现、正式数据管线、跨语言对拍、TypeScript 业务测试及两种来源报告的完整性核验。该入口需要 Python 3 与 pytest；日志和参考输出写入每次独立的临时目录，终端只报告状态与汇总，不打印正式记录。
 
