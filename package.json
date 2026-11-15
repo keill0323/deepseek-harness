@@ -64,6 +64,7 @@
     "study:test": "npm run study:build && npm run test:study-data && node --test modules/comparison/tests/*.test.ts modules/diagnosis/tests/*.test.ts modules/guidance/tests/*.test.ts modules/app/tests/*.test.ts && node --test competitions/smart-learning-companion/wang-zhenyu/tests/*.test.mjs",
     "study:export": "node modules/app/cli.ts export",
     "study:demo": "node modules/app/demo.ts",
+    "study:harness": "node modules/app/harness.ts",
     "study:benchmark": "node modules/app/benchmark.ts",
     "test:coverage": "pnpm run build:native-system && vitest run --coverage",
     "build:native-system": "tsx native/system/scripts/build.ts --host-addon-only",

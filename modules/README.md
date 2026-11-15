@@ -68,7 +68,18 @@ node modules/app/cli.ts run --data tmp/study-data/input --operation get_student_
 
 ## Harness 调度
 
-仓库的默认技能发现机制会从当前 Git 项目读取 `.agents/skills`，本项目提供 [study-companion 技能](../.agents/skills/study-companion/SKILL.md)。在现有 `dsh` profile 中打开该仓库，可由技能调用同一套业务 CLI 并交付本地产物路径；框架核心和应用启动方式没有改动。技能要求 `--summary-only`，不把逐条赛事数据和报告详情回传远程模型。已验证本地 CLI 调度入口；尚未完成真实远程模型会话验收。
+仓库的默认技能发现机制会从当前 Git 项目读取 `.agents/skills`，本项目提供 [study-companion 技能](../.agents/skills/study-companion/SKILL.md)。在现有 `dsh` profile 中打开该仓库，可由技能调用同一套业务 CLI 并交付本地产物路径；框架核心和应用启动方式没有改动。技能要求 `--summary-only`，不把逐条赛事数据和报告详情回传远程模型。已使用官方 `dsh 0.2.2-rc.3` headless profile 完成一次真实模型会话联调，覆盖 Skill 发现与加载、统计/比较/诊断/计划调用和报告导出；输入为自编合成数据，队员真人复验仍待完成。
+
+`study:harness` 用已安装的官方 `dsh` headless profile 执行真实模型会话。先在本地安装与根 `package.json` 版本相同的 `@deepseek-ai/dsh`，并将 `DEEPSEEK_API_KEY` 配置在环境变量或 Git 忽略的本地 `.env`；不要把密钥写进命令、报告或提交。此命令需要真实 API 凭据，不在缺少凭据时跳过或伪造成功。
+
+```sh
+npm run study:build
+npm run study:harness -- --dsh-bin tmp/study-harness-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js --env-file .env --out tmp/study-data/harness-run-01
+```
+
+检查为每次运行创建独立 workspace、Harness home 和会话日志，只放入自编合成输入、请求文件和当前业务模块；关闭可选会话日志上传与遥测。业务模块通过目录链接复用，CLI 按真实文件路径识别入口，源文件及构建后的入口均支持符号链接或 Windows junction。真实 Harness 必须发现并加载 Skill、调用统计/两人比较/诊断/计划四类请求、导出完整报告并返回新报告路径。进程退出码、持久化会话、工具完成记录、调用标记、四项结果与报告完整性全部通过后才写入 `verification.json`；原始会话日志仅保存在本地。输出目录拒绝覆盖，凭据文件不复制到测试 workspace。整个报告仍标记 `fixture`，`human_review` 仍为 `pending`。
+
+自动业务 CI 覆盖联调检查器的成功条件与拒绝条件，不使用真实 API 密钥，也不代表真实模型会话已经通过。npm 若明确提示跳过 `@deepseek-ai/dsh-subprocess-local` 的安装脚本，应先按运行时的安装策略完成该官方包的 `ensure-spawn-helper.mjs` 步骤，避免模型调用 shell 时遇到辅助程序不可执行。
 
 ## 验证与构建
 
