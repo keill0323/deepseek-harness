@@ -61,7 +61,7 @@
     "test": "pnpm run build:native-system && vitest run",
     "test:study-data": "npm --prefix modules/data run build && npm --prefix modules/data test",
     "study:build": "node modules/data/node_modules/typescript/bin/tsc -p modules/tsconfig.build.json && node modules/app/build-assets.mjs && node modules/data/node_modules/typescript/bin/tsc --noEmit -p modules/tsconfig.json",
-    "study:test": "npm run study:build && npm run test:study-data && node --test modules/comparison/tests/*.test.ts modules/diagnosis/tests/*.test.ts modules/guidance/tests/*.test.ts modules/app/tests/*.test.ts",
+    "study:test": "npm run study:build && npm run test:study-data && node --test modules/comparison/tests/*.test.ts modules/diagnosis/tests/*.test.ts modules/guidance/tests/*.test.ts modules/app/tests/*.test.ts && node --test competitions/smart-learning-companion/wang-zhenyu/tests/*.test.mjs",
     "study:export": "node modules/app/cli.ts export",
     "study:demo": "node modules/app/demo.ts",
     "study:benchmark": "node modules/app/benchmark.ts",

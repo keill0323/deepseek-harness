@@ -163,13 +163,14 @@ function vEvidenceBody(record) {
     vEl('dl', 'evidence-meta',
       vEl('dt', '', '学生 / 题目 / 节点'), vEl('dd', '', `${record.student_id} / ${record.item_id} / ${record.node_id}`),
       vEl('dt', '', '作答事件 / 修订'), vEl('dd', '', `${record.event_id} / v${record.revision}`),
-      vEl('dt', '', '评分 / 统计处理'), vEl('dd', '', `${record.grading_status} · ${record.score ?? '未知'} / ${record.max_score ?? '未知'} · ${record.include_in_statistics ? '纳入统计' : '未纳入统计'}`),
+      vEl('dt', '', '原始评分 / 统计处理'), vEl('dd', '', `${record.grading_status} · ${record.score ?? '未知'} / ${record.max_score ?? '未知'} · ${record.include_in_statistics ? '纳入统计' : '未纳入统计'}`),
+      vEl('dt', '', '生效主题 / 得分 / 满分'), vEl('dd', '', `${record.corrected?.topic_id ?? record.topic_id} · ${record.corrected?.score ?? record.score ?? '未知'} / ${record.corrected?.max_score ?? record.max_score ?? '未知'}`),
       vEl('dt', '', '来源'), vEl('dd', '', `${record.source.file} · 第 ${record.source.row_number} 条逻辑行`)),
     vEl('h3', '', '题目'), vEl('p', 'preserve', vItems.get(record.item_id)?.['题干或内容'] ?? '题目正文未随报告提供。'),
     vEl('h3', '', '原始最终作答'), vEl('pre', 'evidence-text', record.answer || '未提供'),
     vEl('h3', '', '原始解答过程'), vEl('pre', 'evidence-text', record.steps || '未提供，不能编造步骤错误。'),
     vEl('h3', '', '原始分点评分'), vEl('pre', 'evidence-text', record.point_scores || '未提供'),
-    issues.length ? vEl('div', 'review-note', vEl('strong', '', '待复核原因'), vEl('ul', '', issues)) : null)
+    issues.length ? vEl('div', 'review-note', vEl('strong', '', '质量问题与处理依据'), vEl('ul', '', issues)) : null)
 }
 
 function vOpenEvidence(id) {
@@ -205,8 +206,8 @@ function vOverview() {
   vMain.append(vMetrics([
     { label: '模拟学生', value: vStudents.length, detail: `${vWorkspace.classes.length} 个模拟班级` },
     { label: '当前作答事件', value: vWorkspace.summary.current_event_count, detail: `${vWorkspace.summary.raw_record_count} 行原始记录，先选最高修订` },
-    { label: '有效计分记录', value: vWorkspace.summary.included_count, detail: '通过质量检查的当前记录' },
-    { label: '等待复核', value: vWorkspace.summary.review_count, detail: '保留原值，暂不用于得分统计' },
+    { label: '有效计分记录', value: vWorkspace.summary.stat_included_count, detail: '实际进入统计的当前记录' },
+    { label: '等待复核', value: vWorkspace.summary.review_count, detail: '复核标记；结构冲突项暂不计分' },
   ]))
   const preferred = ['D01', 'D14', 'D17'].filter(id => vStudents.some(student => student.student_id === id))
   const representatives = [...new Set([...preferred, ...vStudents.map(student => student.student_id)])].slice(0, 3)
@@ -294,6 +295,7 @@ function vPlan() {
   const item = vCase()
   if (!item) return vMain.append(vEmpty('当前没有可用计划。'))
   vCurrentExport = item.plan
+  vMain.append(vSelect('内容模式', [{ value: 'student', label: '学生提示' }, { value: 'teacher', label: '教师核对' }], vState.planMode ?? 'student', value => { vState.planMode = value; vRender() }).wrapper)
   const certaintyNames = { insufficient: '证据不足', provisional: '结论暂定', adequate: '证据较充分' }
   vMain.append(vEl('div', 'plan-intro', vEl('div', '', vEl('p', 'eyebrow', '当前建议类型'), vEl('h2', '', vKindNames[item.plan.payload.plan_type]),
     vEl('p', 'muted', `证据状态：${certaintyNames[item.plan.payload.certainty] ?? '证据不足'} · ${item.plan.payload.summary ?? '本地规则根据当前节点已有记录生成。'}`),
@@ -330,7 +332,12 @@ function vPlan() {
       return vEl('div', 'question', vEl('div', 'question-heading', vEl('strong', '', id), vEl('span', 'muted', question?.['题型'] ?? '学习练习')),
         vEl('p', 'question-text preserve', question?.['题干或内容'] ?? '题目正文未随报告提供。'),
         question?.['选项'] ? vEl('p', 'preserve muted', question['选项']) : null,
-        controls, hintText)
+        controls, hintText,
+        vState.planMode === 'teacher' ? vEl('details', 'material-details', vEl('summary', '', '教师参考答案与评分依据'),
+          vEl('p', 'notice', '仅供教师核对；学生练习清单不包含以下内容。'),
+          vEl('h3', '', '参考答案'), vEl('p', 'preserve', item.teacher_hints[id]?.payload.teacher_solution?.reference_answer || '未提供'),
+          vEl('h3', '', '参考解析'), vEl('p', 'preserve', item.teacher_hints[id]?.payload.teacher_solution?.reference_analysis || '未提供'),
+          vEl('h3', '', '评分依据'), vEl('p', 'preserve', item.teacher_hints[id]?.payload.teacher_solution?.scoring_rubric || '未提供')) : null)
     })
     const detail = vEl('dl', 'activity-details',
       vEl('dt', '', '完成标准'), vEl('dd', '', (activity.success_criteria ?? []).join('；')),
@@ -392,7 +399,7 @@ function vComparison() {
 
 function vClasses() {
   const control = vSelect('选择班级', vWorkspace.classes.map(id => ({ value: id, label: id })), vState.selectedClass, value => { vState.selectedClass = value; vRender() })
-  const result = analyze_class(vSnapshot, { class_id: vState.selectedClass, node_id: vState.node })
+  const result = vWorkspace.class_reports[vScopeKey(vState.selectedClass, vState.node)]
   const payload = result.payload
   vCurrentExport = result
   vMain.append(vEl('p', 'print-scope', `班级 ${vState.selectedClass} · 测验节点 ${vState.node}`))
@@ -410,6 +417,23 @@ function vClasses() {
     { label: '有效记录', render: row => row.valid_record_count },
     { label: '得分率', render: row => vRate(row.score_rate) },
   ], payload.topics)))
+  vMain.append(vPanel('逐题与评分点分布', '按有效作答事件计数，另列不同学生人数；缺记录不记零分。', payload.items.map(item => vEl('details', 'material-details',
+    vEl('summary', '', `${item.item_id} · ${item.scored_student_count} 人 / ${item.valid_record_count} 条有效记录 · ${vRate(item.score_rate)}`),
+    vEl('p', 'muted', `得分分布：${item.score_distribution.map(value => `${value.score}分 ${value.record_count}条`).join('；') || '暂无已评分样本'}`),
+    vTable([{ label: '评分点', render: point => point.point_id }, { label: '有效人数', render: point => point.scored_student_count },
+      { label: '得分率', render: point => vRate(point.score_rate) },
+      { label: '分布（事件数）', render: point => point.score_distribution.map(value => `${value.score}分 ${value.record_count}条`).join('；') || '暂无样本' },
+      { label: '依据', render: point => vEvidenceLinks(point.evidence_ids) }], item.scoring_points)))))
+  const plan = vWorkspace.class_plans[vScopeKey(vState.selectedClass, vState.node)]
+  if (plan) {
+    vMain.append(vPanel('班级教学建议', '按指标与已有证据分组，不作全班能力排名。', plan.payload.recommendations.map(recommendation => vEl('section', 'question',
+      vEl('h3', '', recommendation.goal), vEl('p', '', `适用学生：${recommendation.student_ids.join('、')}`),
+      vEl('p', '', recommendation.rationale), vEl('ol', '', recommendation.steps.map(step => vEl('li', '', step))),
+      vEl('p', 'muted', `可选题目：${recommendation.item_ids.join('、')} · 材料：${recommendation.material_ids.join('、') || '未提供'}`),
+      vEl('p', '', `观察：${recommendation.observation}`), vEl('p', '', `调整条件：${recommendation.adjust_when}`),
+      vEvidenceLinks(recommendation.evidence_ids)))))
+    vMain.append(vButton('导出班级教学建议', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.json`)), vLimitations(plan))
+  }
   vMain.append(vPanel('学生记录概况', '点击学生查看其诊断，空记录保持未知。', vTable([
     { label: '学生', render: row => vButton(row.student_id, () => vShow('diagnosis', row.student_id), 'text-button') },
     { label: '有效 / 已有记录', render: row => `${row.valid_record_count} / ${row.record_count}` },
@@ -442,7 +466,7 @@ function vCurriculum() {
 
 function vQuality() {
   vMain.append(vMetrics([
-    { label: '待复核记录', value: vWorkspace.quality_records.length, detail: '全部保留原值并隔离统计' },
+    { label: '质量问题记录', value: vWorkspace.quality_records.length, detail: '保留原值；已纠正与待复核分别处理' },
     { label: '修订事件', value: vWorkspace.summary.revised_event_count, detail: '最高版本异常时不会回退旧版' },
     { label: '正常未评分排除', value: vWorkspace.summary.excluded_count, detail: '未评分不是错误作答' },
   ]))
@@ -465,10 +489,10 @@ function vQuality() {
     vCurrentExport = { ...WORKSPACE, evidence_ids: records.map(record => record.record_id), scope: { quality_scope: vState.qualityScope, search: vState.qualitySearch,
       ...(vState.qualityScope === 'current' ? { student_id: vState.student, node_id: vState.node } : {}) },
       payload: { quality_records: records, summary: vWorkspace.summary, filtered_count: records.length } }
-    count.textContent = `显示 ${records.length} / ${vWorkspace.quality_records.length} 条待复核记录 · ${vState.qualityScope === 'current' ? `${vState.student} / ${vState.node}` : '整个数据快照'}${vState.qualitySearch.trim() ? ` · 查找“${vState.qualitySearch.trim()}”` : ''}`
+    count.textContent = `显示 ${records.length} / ${vWorkspace.quality_records.length} 条质量问题记录 · ${vState.qualityScope === 'current' ? `${vState.student} / ${vState.node}` : '整个数据快照'}${vState.qualitySearch.trim() ? ` · 查找“${vState.qualitySearch.trim()}”` : ''}`
     list.replaceChildren()
     for (const record of records) {
-    const details = vEl('details', 'quality-record', vEl('summary', '', vEl('strong', '', record.record_id), vEl('span', '', `${record.student_id} · ${record.item_id} · ${record.node_id}`), vBadge('needs_review')),
+    const details = vEl('details', 'quality-record', vEl('summary', '', vEl('strong', '', record.record_id), vEl('span', '', `${record.student_id} · ${record.item_id} · ${record.node_id}`), vBadge(record.action === 'review' ? 'needs_review' : 'ok')),
       vEl('ul', 'quality-reasons', record.quality_issues.map(issue => vEl('li', '', issue.message))), vEvidenceBody(record))
       list.append(details)
     }

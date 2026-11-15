@@ -1,4 +1,4 @@
-import { get_student_stats } from '../data/core.ts'
+import { effectiveScore, effectiveMax, get_student_stats } from '../data/core.ts'
 import type { CsvRow, EvidenceRecord, PreparedDataset, ResultEnvelope, StudentScope, StudentStats } from '../data/types.ts'
 import type { CurriculumEntry, CurriculumPayload, DiagnosisPayload, Finding } from './types.ts'
 
@@ -161,11 +161,11 @@ export function diagnose_student(dataset: PreparedDataset, scope: StudentScope, 
       const rubric = (item?.['评分点'] ?? '').split(/\r?\n/u)
       const rootPoint = rubric.find(line => /负数/u.test(line) && /反向|方向/u.test(line))?.split(/\s/u)[0]
       const rootScore = rootPoint ? points(record).get(rootPoint) : undefined
-      const scoringConflict = (rootScore !== undefined && rootScore > 0) || record.score === record.max_score
+      const scoringConflict = (rootScore !== undefined && rootScore > 0) || effectiveScore(record) === effectiveMax(record)
       payload.findings.push({ ...baseFinding(entry, 'inequality_direction', record.record_id), category: scoringConflict ? 'scoring_review' : 'fact', title: scoringConflict ? '过程与分点评分需复核' : '负数除法步骤未改变方向', description: scoringConflict ? '相邻步骤显示除以负数后未改变不等号方向，但记录获得满分或相关评分点仍给分，应先核对过程与评分。' : '相邻两步显示两边除以同一负数后，数值相符但不等号仍保持原方向。后续解集沿用此步，不重复计作第二个独立问题。', item_id: record.item_id, evidence_ids: [record.record_id], step_refs: [wrongStep], point_refs: rootPoint ? [rootPoint] : [], })
       continue
     }
-    if (record.score! < record.max_score!) {
+    if (effectiveScore(record)! < effectiveMax(record)!) {
       const missingPoints = [...points(record)].filter(([, score]) => score === 0).map(([id]) => id)
       payload.findings.push({ ...baseFinding(entry, 'partial_score', record.record_id), category: 'fact', title: '该题存在未得分部分', description: record.steps.trim() === '' ? '现有评分显示该题未得满分，但未提供解答过程，不能据此编造具体步骤错误。' : '现有评分显示该题未得满分；自动规则尚不能定位可靠的具体变形错误，需对照题目评分点查看过程。', item_id: record.item_id, evidence_ids: [record.record_id], step_refs: [], point_refs: missingPoints })
     }

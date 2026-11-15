@@ -3,6 +3,7 @@ import type { EvidenceRecord, PreparedDataset, ResultEnvelope } from '../data/ty
 import { analyze_class, compare_classes, compare_students, compare_with_peers } from '../comparison/core.ts'
 import { diagnose_student, get_curriculum } from '../diagnosis/core.ts'
 import { build_learning_plan, get_hint } from '../guidance/core.ts'
+import { build_class_plan } from '../guidance/class.ts'
 import { make_result, scope_key } from '../shared/result.ts'
 
 /** One complete, version-consistent individual view. */
@@ -12,6 +13,7 @@ export interface StudentCase {
   plan: ReturnType<typeof build_learning_plan>
   peers: ReturnType<typeof compare_with_peers>
   hints: Record<string, Array<ReturnType<typeof get_hint>>>
+  teacher_hints: Record<string, ReturnType<typeof get_hint>>
 }
 
 /** A local teaching report containing no remote model responses. */
@@ -25,6 +27,7 @@ export interface WorkspacePayload {
   curriculum: ReturnType<typeof get_curriculum>
   cases: Record<string, StudentCase>
   class_reports: Record<string, ReturnType<typeof analyze_class>>
+  class_plans: Record<string, ReturnType<typeof build_class_plan>>
   quality_records: EvidenceRecord[]
   browser_snapshot: PreparedDataset
 }
@@ -41,6 +44,7 @@ export function build_workspace(dataset: PreparedDataset): ResultEnvelope<Worksp
   const curriculum = get_curriculum(dataset)
   const cases: Record<string, StudentCase> = Object.create(null) as Record<string, StudentCase>
   const classReports: WorkspacePayload['class_reports'] = Object.create(null) as WorkspacePayload['class_reports']
+  const classPlans: WorkspacePayload['class_plans'] = Object.create(null) as WorkspacePayload['class_plans']
   const operationFailures: string[] = []
   for (const node of nodes) {
     for (const student of students) {
@@ -50,15 +54,22 @@ export function build_workspace(dataset: PreparedDataset): ResultEnvelope<Worksp
       const plan = build_learning_plan(dataset, scope, diagnosis, statistics)
       const peers = compare_with_peers(dataset, scope)
       const hints: StudentCase['hints'] = Object.create(null) as StudentCase['hints']
+      const teacherHints: StudentCase['teacher_hints'] = Object.create(null) as StudentCase['teacher_hints']
       const selected = [...new Set(plan.payload.activities.flatMap(activity => activity.item_ids))]
       for (const itemId of selected) {
         hints[itemId] = ([1, 2, 3] as const).map(level => get_hint(dataset, { ...scope, item_id: itemId, level, mode: 'student' }))
+        teacherHints[itemId] = get_hint(dataset, { ...scope, item_id: itemId, level: 3, mode: 'teacher' })
       }
-      const results: ResultEnvelope<unknown>[] = [statistics, diagnosis, plan, peers, ...Object.values(hints).flat()]
+      const results: ResultEnvelope<unknown>[] = [statistics, diagnosis, plan, peers, ...Object.values(hints).flat(), ...Object.values(teacherHints)]
       if (results.some(result => result.result_status === 'error')) operationFailures.push(`${student.student_id}/${node.node_id}`)
-      cases[scope_key(student.student_id, node.node_id)] = { statistics, diagnosis, plan, peers, hints }
+      cases[scope_key(student.student_id, node.node_id)] = { statistics, diagnosis, plan, peers, hints, teacher_hints: teacherHints }
     }
-    for (const classId of classes) classReports[scope_key(classId, node.node_id)] = analyze_class(dataset, { class_id: classId, node_id: node.node_id })
+    for (const classId of classes) {
+      const scope = { class_id: classId, node_id: node.node_id }, key = scope_key(classId, node.node_id)
+      classReports[key] = analyze_class(dataset, scope)
+      classPlans[key] = build_class_plan(dataset, scope, classReports[key])
+      if (classReports[key].result_status === 'error' || classPlans[key].result_status === 'error') operationFailures.push(key)
+    }
   }
   const sanitizedItems = dataset.input.items.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !['参考答案', '参考解析', '评分点'].includes(key))))
   const browserSnapshot: PreparedDataset = {
@@ -68,14 +79,14 @@ export function build_workspace(dataset: PreparedDataset): ResultEnvelope<Worksp
   }
   const payload: WorkspacePayload = {
     title: '智慧学伴', engine: 'local_rules', students, nodes, classes,
-    summary: dataset.summary, curriculum, cases, class_reports: classReports,
+    summary: dataset.summary, curriculum, cases, class_reports: classReports, class_plans: classPlans,
     // 质量记录 = 有 quality_issues 的全部当前记录（处置后仍可追溯，与验收书 6 条一致）
     quality_records: dataset.current.filter(record => record.quality_issues.length > 0), browser_snapshot: browserSnapshot,
   }
   const limitations = [
     '本作品使用本地规则、统计和材料索引，未调用远程大模型。',
     '本地教师报告包含模拟作答证据，仅供本次赛事使用；界面不提供生产环境身份认证。',
-    '未评分和待复核记录不计得分，未观察内容不推断为未掌握；不依据模拟数据证明真实教学效果。',
+    '未评分记录不计得分；复核记录依统计标记处理，复核分数不作为薄弱或成功活动依据。未观察内容不推断为未掌握。',
   ]
   if (operationFailures.length) limitations.push(`以下对象存在未完成操作：${operationFailures.join('、')}`)
   return make_result(dataset, {}, payload, operationFailures.length ? 'error' : dataset.summary.review_count ? 'needs_review' : 'ok', dataset.current.map(record => record.record_id), limitations)
@@ -113,7 +124,7 @@ export function execute_operation(dataset: PreparedDataset, operation: string, r
       get_curriculum: ['topic_id'], get_evidence: ['student_id', 'node_id', 'record_ids', 'event_ids', 'include_history'],
       compare_students: ['left_student_id', 'right_student_id', 'node_id', 'item_ids'],
       compare_with_peers: ['student_id', 'node_id', 'class_id', 'item_ids'],
-      analyze_class: ['class_id', 'node_id'], compare_classes: ['left_class_id', 'right_class_id', 'node_id', 'item_ids'],
+      analyze_class: ['class_id', 'node_id'], build_class_plan: ['class_id', 'node_id'], compare_classes: ['left_class_id', 'right_class_id', 'node_id', 'item_ids'],
       get_hint: ['student_id', 'node_id', 'item_id', 'level', 'mode'], workspace: [],
     }
     const fields = accepted[operation]
@@ -141,6 +152,7 @@ export function execute_operation(dataset: PreparedDataset, operation: string, r
         })
       }
       case 'analyze_class': return analyze_class(dataset, { class_id: value(request, 'class_id'), node_id: value(request, 'node_id') })
+      case 'build_class_plan': return build_class_plan(dataset, { class_id: value(request, 'class_id'), node_id: value(request, 'node_id') })
       case 'compare_students': {
         const items = stringList(request, 'item_ids')
         return compare_students(dataset, { left_student_id: value(request, 'left_student_id'), right_student_id: value(request, 'right_student_id'), node_id: value(request, 'node_id'), ...(items ? { item_ids: items } : {}) })

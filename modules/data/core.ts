@@ -116,14 +116,25 @@ function checkPoints(record: EvidenceRecord, item: CsvRow, issues: QualityIssue[
   return total
 }
 
-/** 有效值读取：corrected 优先，original 兜底（与 Python 端 effective_* 对齐）。 */
-function effectiveTopic(record: EvidenceRecord): string {
+/** Resolved topic after explicit quality correction.
+ * @param record - Current or historical evidence.
+ * @returns Corrected value when present, otherwise the imported value.
+ */
+export function effectiveTopic(record: EvidenceRecord): string {
   return record.corrected?.topic_id ?? record.topic_id
 }
-function effectiveScore(record: EvidenceRecord): number | null {
+/** Resolved score after explicit quality correction.
+ * @param record - Current or historical evidence.
+ * @returns Corrected value when present, otherwise the imported value.
+ */
+export function effectiveScore(record: EvidenceRecord): number | null {
   return record.corrected?.score ?? record.score
 }
-function effectiveMax(record: EvidenceRecord): number | null {
+/** Resolved maximum after explicit quality correction.
+ * @param record - Current or historical evidence.
+ * @returns Corrected value when present, otherwise the imported value.
+ */
+export function effectiveMax(record: EvidenceRecord): number | null {
   return record.corrected?.max_score ?? record.max_score
 }
 
@@ -240,6 +251,11 @@ function evaluateRecord(
       nonBlocking.add('point_total_mismatch')
     }
     if (semanticKept) nonBlocking.add('answer_score_conflict')
+  }
+  for (const issue of issues) {
+    if (issue.code === 'topic_mismatch' && record.corrected?.topic_id !== undefined) issue.message = '原始主题与题库不一致；生效主题已按题库纠正，原文保留。'
+    if (issue.code === 'maximum_mismatch' && record.corrected?.max_score !== undefined) issue.message = '原始满分与题库不一致；生效满分已按题库纠正，原文保留。'
+    if (['score_out_of_range', 'point_total_mismatch'].includes(issue.code) && record.corrected?.score !== undefined) issue.message = '原始得分与满分或分点评分矛盾；已按自洽评分点合计纠正，原文保留。'
   }
   const blocking = issues.filter(issue => !nonBlocking.has(issue.code))
   record.include_in_statistics = record.grading_status === '已评分'
@@ -380,7 +396,7 @@ export function get_student_stats(dataset: PreparedDataset, scope: StudentScope)
     review_record_ids: records.filter(record => record.action === 'review').map(record => record.record_id).sort(),
   }
   const limitations = ['统计仅描述该节点已有且通过质量检查的作答，缺少记录不等于答错或未掌握。', '主题覆盖不代表该主题全部知识均已测量，不直接比较不同节点的总分为学习进步。']
-  if (payload.review_record_ids.length > 0) limitations.push('待复核记录已保留原值，并排除在得分统计之外。')
+  if (payload.review_record_ids.length > 0) limitations.push('待复核记录保留原值；是否计分由include_in_statistics明确标识，语义复核可按当前策略保留原分，结构冲突不计分。')
   if (records.length === 0) limitations.push('该学生在指定节点没有作答记录，需补充观察。')
   else if (payload.valid_record_count === 0) limitations.push('该节点没有可计分记录，不能形成得分结论。')
   const status = payload.review_record_ids.length > 0 ? 'needs_review' : payload.valid_record_count === 0 ? 'insufficient_data' : 'ok'

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +8,7 @@ import test from 'node:test'
 import { prepare_workspace_dataset } from '../pipeline.ts'
 import { build_workspace } from '../core.ts'
 import { render_report } from '../report.ts'
+import { check_export } from '../check-export.ts'
 import { make_input } from '../../data/tests/helpers.ts'
 
 const builtCli = fileURLToPath(new URL('../../data/lib/companion/app/cli.js', import.meta.url))
@@ -59,6 +60,14 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   assert.ok(!/\bfetch\s*\(|https?:\/\//u.test(html))
   assert.equal(run(['export', '--data', directory, '--out', exportDirectory]).status, 1)
   assert.equal(JSON.parse(await readFile(join(exportDirectory, 'manifest.json'), 'utf8')).status, 'complete')
+  assert.equal(await check_export(exportDirectory, 'fixture'), true)
+  assert.equal(await check_export(exportDirectory, 'live'), false)
+  await writeFile(join(exportDirectory, 'index.html'), '<!doctype html><html>incomplete</html>')
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+  await writeFile(join(exportDirectory, 'index.html'), html)
+  await unlink(join(exportDirectory, 'class-plans', 'C1%3AM1.json'))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
+
 })
 
 test('report escapes embedded script delimiters from literal input fields', async () => {
