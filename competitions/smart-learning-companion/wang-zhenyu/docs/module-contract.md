@@ -4,38 +4,45 @@
 
 ```json
 {
-  "student": { "id": "D01", "class_id": "DC01" },
+  "student": { "id": "S01", "class_id": "SC01" },
   "evidence": [
     {
-      "record_id": "DR0023",
-      "event_id": "D01-N02-Q043",
+      "record_id": "XR01",
+      "event_id": "S01-N02-Q_SAMPLE_01",
       "revision": 2,
-      "student_id": "D01",
+      "student_id": "S01",
       "node_id": "N02",
-      "item_id": "Q043",
+      "item_id": "Q_SAMPLE_01",
       "topic_id": "T03",
       "indicator_id": "T03I1",
       "status": "已评分",
       "score": 1,
       "max_score": 3,
-      "answer": "x<-4",
+      "answer": "示例作答",
       "steps": "……",
-      "point_scores": "Q043P1=1；Q043P2=0；Q043P3=0",
-      "source_ref": "DR0023"
+      "point_scores": "Q_SAMPLE_01P1=1；Q_SAMPLE_01P2=0；Q_SAMPLE_01P3=0",
+      "source_ref": "XR01"
     }
   ],
   "questions": {
-    "Q043": {
-      "material_id": "Q043",
+    "Q_SAMPLE_01": {
+      "material_id": "Q_SAMPLE_01",
       "topic_id": "T03",
       "indicator_id": "T03I1",
       "type": "解答题",
       "stem": "解不等式……",
-      "answer": "x>-4",
+      "answer": "示例答案",
       "analysis": "……",
       "max_score": 3
     }
   },
+  "target_node_id": "N02",
+  "nodes": [
+    {
+      "node_id": "N02",
+      "available_item_ids": ["Q041", "Q_SAMPLE_01", "Q044"]
+    }
+  ],
   "focus_indicator": "T03I1"
 }
 ```
@@ -45,6 +52,8 @@
 - `student`、`evidence`：魏文宇模块的个人统计与证据查询。
 - `focus_indicator`、`plan_mode`：纪宏锋模块的诊断结果；也可由后端指定。
 - `questions`：题库和课程资料索引。
+- `target_node_id`：本次计划的目标节点；证据必须全部属于该节点。
+- `nodes`：节点可用题集；所有计划题目必须在目标节点范围内。
 - `comparisons`：宗博文模块可传入相似同伴与班级参照，但不参与未给出的掌握度推断。
 
 ## 输出：LearningPlan
@@ -53,6 +62,7 @@
 
 - `plan_id`、`generated_at`、`schema_version`
 - `student`
+- `target_node_id`
 - `plan_kind`：`remediation | consolidation | extension | coverage_probe`
 - `certainty`：`insufficient | provisional | adequate`
 - `primary_focus`
@@ -80,7 +90,9 @@
 
 1. 同一`event_id`只使用最高修订版本。
 2. 待评分与未作答不得进入得分率分母。
-3. 任何结论必须带`evidence_ids`或`source_ref`。
-4. 学生提示不得包含参考答案或最后结果。
-5. 切换学生、范围或题目后，不得复用上一名学生的证据。
-6. 生成计划后必须通过`validatePlan()`。
+3. 证据必须属于请求学生和目标节点。
+4. 题目必须存在于题库，且属于目标节点可用题集。
+5. 任何结论必须带`evidence_ids`或`source_ref`。
+6. 学生提示不得包含参考答案、最后结果或题目所问结论。
+7. 切换学生、范围或题目后，不得复用上一名学生的证据。
+8. 生成计划后必须使用同一题库和节点上下文通过`validatePlan(plan, context)`。

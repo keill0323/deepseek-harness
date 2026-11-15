@@ -5,7 +5,7 @@
  */
 import { INDICATORS, TOPICS, getTopic } from './knowledge-base.mjs';
 
-export const PLAN_SCHEMA_VERSION = '1.0.0';
+export const PLAN_SCHEMA_VERSION = '1.1.0';
 
 const STATUS_GRADED = '已评分';
 
@@ -82,6 +82,123 @@ function normalizeQuestions(questions) {
   }]));
 }
 
+function splitList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  return String(value ?? '')
+    .split(/[、,，;；\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeNodes(nodes) {
+  const entries = Array.isArray(nodes)
+    ? nodes.map((node) => [node.node_id ?? node['节点编号'], node])
+    : Object.entries(nodes ?? {});
+  return new Map(entries.filter(([id]) => id).map(([id, node]) => [id, {
+    node_id: id,
+    date: node.date ?? node['模拟测验日期'] ?? '',
+    topics: splitList(node.topics ?? node['已教及测量主题']),
+    available_item_ids: splitList(node.available_item_ids ?? node['可用题目编号'])
+  }]));
+}
+
+function nodeAllowsItem(node, itemId) {
+  return Boolean(node && itemId && node.available_item_ids.includes(itemId));
+}
+
+function resolveTargetNodeId(evidence, nodes, requestedNodeId) {
+  if (requestedNodeId) {
+    assert(!nodes.size || nodes.has(requestedNodeId), '未知目标节点: ' + requestedNodeId);
+    return requestedNodeId;
+  }
+  const evidenceNodes = unique(evidence.map((item) => item.node_id));
+  assert(evidenceNodes.length <= 1, '证据跨越多个节点，必须显式指定 target_node_id');
+  if (evidenceNodes.length === 1) {
+    assert(!nodes.size || nodes.has(evidenceNodes[0]), '证据节点不存在: ' + evidenceNodes[0]);
+    return evidenceNodes[0];
+  }
+  if (nodes.size === 0) return null;
+  return [...nodes.values()]
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .at(-1)?.node_id ?? null;
+}
+
+function validateEvidenceContext(studentId, evidence, questions, nodes, targetNodeId) {
+  const errors = [];
+  for (const item of evidence) {
+    const label = item.record_id || item.event_id || '(unknown)';
+    if (item.student_id !== studentId) errors.push(label + ': 证据不属于当前学生');
+    if (targetNodeId && item.node_id !== targetNodeId) errors.push(label + ': 证据不属于当前目标节点');
+    const question = questions.get(item.item_id);
+    if (!question) {
+      errors.push(label + ': 题目不存在');
+      continue;
+    }
+    if (item.topic_id && question.topic_id && item.topic_id !== question.topic_id) {
+      errors.push(label + ': 证据主题与题库不一致');
+    }
+    if (item.indicator_id && question.indicator_id && item.indicator_id !== question.indicator_id) {
+      errors.push(label + ': 证据指标与题库不一致');
+    }
+    if (item.max_score !== null && question.max_score !== null && item.max_score !== question.max_score) {
+      errors.push(label + ': 证据满分与题库不一致');
+    }
+    if (nodes.size > 0) {
+      const node = nodes.get(item.node_id);
+      if (!node) errors.push(label + ': 节点不存在');
+      else if (!nodeAllowsItem(node, item.item_id)) errors.push(label + ': 题目不在该节点允许题集内');
+    }
+  }
+  return errors;
+}
+
+function questionForPlan(questions, itemId) {
+  return questions.get(itemId) ?? null;
+}
+
+function normalizeHintText(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[−–—]/g, '-')
+    .replace(/[“”"'‘’\s]+/g, '')
+    .replace(/[。；;，,]/g, '');
+}
+
+function answerLeakCandidates(question) {
+  const answer = String(question?.answer ?? '').trim();
+  if (!answer) return [];
+  const values = [answer];
+  for (const segment of answer.split(/[；;。，,\n]+/)) {
+    values.push(segment.replace(/^(?:参考)?答案\s*[:：]?\s*/i, '').replace(/^(?:答|结果|结论)\s*[:：]?\s*/i, ''));
+  }
+  for (const match of answer.matchAll(/[-−]?\d+(?:\.\d+)?/g)) values.push(match[0]);
+  for (const match of answer.matchAll(/[a-z]\s*[<>=≤≥]\s*[-−]?\d+(?:\.\d+)?/gi)) values.push(match[0]);
+  return unique(values.map(normalizeHintText).filter((value) => value.length >= 2));
+}
+
+/** 返回学生提示中可能泄露答案或明确结论的原因；没有泄露时返回 null。 */
+export function detectStudentHintLeak(text, question = null) {
+  const hint = normalizeHintText(text);
+  if (!hint) return null;
+  if (/^(?:答案|参考答案)[:：]/.test(String(text).trim())) return '提示以答案开头';
+  for (const candidate of answerLeakCandidates(question)) {
+    if (hint.includes(candidate)) return '提示包含参考答案片段';
+  }
+  const answer = normalizeHintText(question?.answer);
+  if (/^[a-d]$/.test(answer) && /(?:答案(?:是|为)?|应选|选)[a-d]/i.test(hint)) {
+    return '提示包含选择题答案';
+  }
+  const conclusionPatterns = [
+    /(?:所以|因此|可知|可见).*(?:正确|错误|恒等|等于|为|不变|无关|成立|不成立)/,
+    /(?:恒等于|恒为|对所有.+都不变|与.+取值无关|说法(?:正确|错误))/,
+    /(?:结果|结论)(?:是|为)(?:[-]?\d|[a-z]|.{0,10}(?:不变|无关|正确|错误))/,
+    /(?:应选|选)[a-d]/i
+  ];
+  if (conclusionPatterns.some((pattern) => pattern.test(hint))) return '提示包含题目结论';
+  return null;
+}
+
 function indicatorStats(evidence) {
   const result = new Map();
   for (const item of evidence) {
@@ -150,8 +267,12 @@ function stepHints(indicatorId, specificText) {
 function itemSummary(item, questions) {
   const q = questions.get(item.item_id);
   return {
+    record_id: item.record_id,
     item_id: item.item_id,
+    student_id: item.student_id,
     node_id: item.node_id,
+    topic_id: item.topic_id,
+    indicator_id: item.indicator_id,
     status: item.status,
     score: item.score,
     max_score: item.max_score,
@@ -186,11 +307,27 @@ function buildEvidenceGaps(evidence) {
   }));
 }
 
-function chooseSequence(primary, fallbackItems, requestedItems = []) {
+function selectPracticeItem(indicatorId, questions, nodes, targetNodeId, preferredItems = []) {
+  const kb = INDICATORS[indicatorId]?.practiceItems ?? [];
+  const ordered = unique([...preferredItems, ...kb, ...questions.keys()]);
+  return ordered.find((itemId) => {
+    const question = questionForPlan(questions, itemId);
+    if (!question || question.indicator_id !== indicatorId) return false;
+    if (nodes.size === 0) return true;
+    return nodeAllowsItem(nodes.get(targetNodeId), itemId);
+  }) ?? null;
+}
+
+function chooseSequence(primary, fallbackItems, requestedItems, questions, nodes, targetNodeId) {
   const preferred = unique(requestedItems);
   const fromEvidence = unique((primary?.items ?? []).map((x) => x.item_id));
   const kb = INDICATORS[primary?.indicator_id]?.practiceItems ?? fallbackItems;
-  return unique([...preferred, ...fromEvidence, ...kb]);
+  return unique([...preferred, ...fromEvidence, ...kb]).filter((itemId) => {
+    const question = questionForPlan(questions, itemId);
+    if (!question || question.indicator_id !== primary?.indicator_id) return false;
+    if (nodes.size === 0) return true;
+    return nodeAllowsItem(nodes.get(targetNodeId), itemId);
+  });
 }
 
 function commonAdjustmentRules(primary) {
@@ -219,16 +356,38 @@ function commonAdjustmentRules(primary) {
   ];
 }
 
-function buildCoveragePlan(request, evidence, questions, generatedAt) {
+function buildCoveragePlan(request, evidence, questions, nodes, targetNodeId, generatedAt) {
+  const preferredProbes = ['T02I1', 'T03I1', 'T02I2', 'T02I3', 'T03I2', 'T01I1', 'T01I2', 'T01I3'];
+  const availableProbes = preferredProbes.filter((indicatorId) => (
+    Boolean(selectPracticeItem(indicatorId, questions, nodes, targetNodeId))
+  ));
+  const defaultProbes = [];
+  for (const indicatorId of availableProbes) {
+    if (defaultProbes.length === 0) defaultProbes.push(indicatorId);
+    else if (INDICATORS[indicatorId].topic !== INDICATORS[defaultProbes[0]].topic) {
+      defaultProbes.push(indicatorId);
+      break;
+    }
+  }
+  if (defaultProbes.length < 2 && availableProbes[1]) defaultProbes.push(availableProbes[1]);
   const probes = request.coverage_probe_indicators?.length
     ? request.coverage_probe_indicators
-    : ['T02I1', 'T03I1'];
+    : defaultProbes;
   const probeEvidence = probes.map((indicatorId, index) => {
+    assert(INDICATORS[indicatorId], '未知探测指标: ' + indicatorId);
     const choices = INDICATORS[indicatorId].practiceItems;
-    const itemId = index === 0 ? choices[Math.min(4, choices.length - 1)] : choices[Math.min(2, choices.length - 1)];
-    const q = questions.get(itemId);
-    return { itemId, indicatorId, q };
+    const preferred = index === 0 ? [choices[4]] : [choices[2]];
+    const itemId = selectPracticeItem(indicatorId, questions, nodes, targetNodeId, preferred);
+    assert(itemId, '目标节点内没有可用于探测的题目: ' + indicatorId);
+    return { itemId, indicatorId, q: questions.get(itemId) };
   });
+  const gradedEvidence = evidence.filter((x) => x.status === STATUS_GRADED);
+  const probeHintPairs = probeEvidence.flatMap((probe) => (
+    stepHints(probe.indicatorId).map((hint) => ({ hint, question: probe.q }))
+  ));
+  const hintLeaks = probeHintPairs
+    .map(({ hint, question }) => detectStudentHintLeak(hint.text, question))
+    .filter(Boolean);
   const limitations = [
     '当前只有有限主题的已评分记录，不能推断未测主题已掌握或未掌握。',
     '待评分、未作答和无记录均不进入掌握度计算。',
@@ -238,14 +397,14 @@ function buildCoveragePlan(request, evidence, questions, generatedAt) {
     schema_version: PLAN_SCHEMA_VERSION,
     plan_id: 'PLAN-' + request.student.id + '-coverage-' + generatedAt.slice(0, 10).replaceAll('-', ''),
     generated_at: generatedAt,
-    module: { name: '个性化建议与分步辅导', owner: '王振宇', version: '1.0.0' },
+    module: { name: '个性化建议与分步辅导', owner: '王振宇', version: '1.1.0' },
     student: { id: request.student.id, class_id: request.student.class_id },
+    target_node_id: targetNodeId,
     plan_kind: 'coverage_probe',
     certainty: 'insufficient',
     primary_focus: null,
     summary: '现有证据只覆盖部分主题，先设计低负担观察任务，再决定后续强化方向。',
-    // 仅列已评分证据：待评分/未作答不是掌握度证据（与 remediation 分支口径一致）
-    evidence_used: evidence.filter((x) => x.status === STATUS_GRADED).map((x) => itemSummary(x, questions)),
+    evidence_used: gradedEvidence.map((x) => itemSummary(x, questions)),
     evidence_gaps: buildEvidenceGaps(evidence),
     material_refs: probes.flatMap((id) => materialRefs(id)),
     steps: [
@@ -253,7 +412,7 @@ function buildCoveragePlan(request, evidence, questions, generatedAt) {
         step_no: 1,
         phase: '确认已有优势',
         objective: '用一题已掌握主题的题确认学生能独立说明步骤。',
-        item_refs: [evidence.find((x) => x.status === STATUS_GRADED)?.item_id].filter(Boolean),
+        item_refs: [gradedEvidence[0]?.item_id].filter(Boolean),
         student_action: '选择一题已经做过的题，口述“我先做什么、再做什么、最后怎样检查”。',
         hints: [],
         success_criteria: ['能独立口述完整步骤', '能指出自己使用的规则'],
@@ -293,7 +452,14 @@ function buildCoveragePlan(request, evidence, questions, generatedAt) {
     ],
     limitations,
     teacher_explanation: teacherOnlyFor(probeEvidence.map((x) => ({ item_id: x.itemId })), questions),
-    quality_checks: { no_direct_answer_in_student_hints: true, uncertainty_explicit: true, evidence_ids: evidence.map((x) => x.record_id) }
+    quality_checks: {
+      no_direct_answer_in_student_hints: hintLeaks.length === 0,
+      uncertainty_explicit: true,
+      evidence_ids: gradedEvidence.map((x) => x.record_id),
+      input_context_valid: true,
+      material_refs_present: true,
+      adjustment_conditions_present: true
+    }
   };
 }
 
@@ -307,19 +473,46 @@ export function buildLearningPlan(request, generatedAt = new Date().toISOString(
   assert(request?.student?.class_id, '缺少 student.class_id');
   const evidence = collapseEvents(request.evidence ?? []);
   const questions = normalizeQuestions(request.questions ?? {});
+  const nodes = normalizeNodes(request.nodes ?? {});
+  const targetNodeId = resolveTargetNodeId(
+    evidence,
+    nodes,
+    request.target_node_id ?? request.targetNodeId ?? null
+  );
+  const contextErrors = validateEvidenceContext(
+    request.student.id,
+    evidence,
+    questions,
+    nodes,
+    targetNodeId
+  );
+  assert(contextErrors.length === 0, '证据上下文校验失败: ' + contextErrors.join('; '));
+
   if (request.plan_mode === 'coverage' || evidence.filter((x) => x.status === STATUS_GRADED).length === 0) {
-    return buildCoveragePlan(request, evidence, questions, generatedAt);
+    return buildCoveragePlan(request, evidence, questions, nodes, targetNodeId, generatedAt);
   }
+
   const focus = chooseFocus(evidence, request.focus_indicator);
   assert(focus.indicator_id, '没有可用于生成计划的已评分证据');
   const indicator = INDICATORS[focus.indicator_id];
   const rated = evidence.filter((x) => x.indicator_id === focus.indicator_id && x.status === STATUS_GRADED);
   const rate = focus.stats?.possible ? focus.stats.earned / focus.stats.possible : null;
-  const sequence = chooseSequence(focus.stats, indicator.practiceItems, request.preferred_items ?? []);
-  const requestedReview = request.review_item ? rated.find((item) => item.item_id === request.review_item) : null;
+  const sequence = chooseSequence(
+    { ...focus.stats, indicator_id: focus.indicator_id },
+    indicator.practiceItems,
+    request.preferred_items ?? [],
+    questions,
+    nodes,
+    targetNodeId
+  );
+  assert(sequence.length > 0, '目标节点内没有可用于辅导的题目: ' + focus.indicator_id);
+  const requestedReview = request.review_item
+    ? rated.find((item) => item.item_id === request.review_item)
+    : null;
+  if (request.review_item) assert(requestedReview, '指定复盘题不属于当前学生、节点或指标: ' + request.review_item);
   const review = requestedReview
-    ?? [...rated].sort((a, b) => (a.score / a.max_score) - (b.score / b.max_score))[0]
-    ?? { item_id: request.review_item ?? sequence[0], node_id: '', status: 'no_record', score: null, max_score: null, answer: '', steps: '', point_scores: '', source_ref: '' };
+    ?? [...rated].sort((a, b) => (a.score / a.max_score) - (b.score / b.max_score))[0];
+  assert(review?.item_id, '没有可用于原题复盘的已评分证据');
   const practice = sequence.find((id) => id !== review.item_id) ?? sequence[0];
   const transfer = sequence.find((id) => id !== review.item_id && id !== practice) ?? sequence[1] ?? practice;
   const certainty = certaintyFor(focus.stats?.count ?? 0);
@@ -333,14 +526,98 @@ export function buildLearningPlan(request, generatedAt = new Date().toISOString(
     '待评分、未作答和无记录不会被当作零分或未掌握。',
     '若题目、材料或记录版本发生变化，必须重新生成计划。'
   ];
-  const reviewForTeacher = review.item_id ? [{ item_id: review.item_id }] : [];
+  const reviewForTeacher = [{ item_id: review.item_id }];
   const practiceForTeacher = [{ item_id: practice }, { item_id: transfer }];
+  const steps = [
+    {
+      step_no: 1,
+      phase: '概念复位',
+      objective: '用学习卡恢复规则和观察顺序，不直接解题。',
+      item_refs: [],
+      material_refs: materialRefs(focus.indicator_id),
+      student_action: '读学习卡，用自己的话说出本指标最关键的一条规则，并圈出关键词。',
+      hints: stepHints(focus.indicator_id, '先不要算结果；按“看条件—选规则—写下一步”的顺序说一遍。'),
+      success_criteria: ['能说出规则而不看答案', '能指出题目中触发该规则的词或符号'],
+      next_if_success: '进入原题复盘。',
+      next_if_not: '教师用学习卡中的最小例子示范一次，再让学生复述。'
+    },
+    {
+      step_no: 2,
+      phase: '原题复盘',
+      objective: '定位首次出错步骤，而不是重做整题。',
+      item_refs: [review.item_id],
+      material_refs: materialRefs(focus.indicator_id),
+      student_action: '标出自己第一次不确定的步骤，说明当时依据的规则；使用一级提示后尝试修正该步。',
+      hints: stepHints(focus.indicator_id, '只检查当前这一步：你依据的是哪条规则？符号或方向在这一步有没有变化？'),
+      success_criteria: ['能指出具体卡点', '能按规则修正当前步骤并说明理由'],
+      next_if_success: '进入同类独立练习。',
+      next_if_not: '下降到三级提示，用代值或反向运算核对这一步。',
+      teacher_only: teacherOnlyFor(reviewForTeacher, questions)
+    },
+    {
+      step_no: 3,
+      phase: '独立练习',
+      objective: '在同类题中独立迁移同一规则。',
+      item_refs: [practice],
+      material_refs: materialRefs(focus.indicator_id),
+      student_action: '独立完成，不先看提示；完成后用一句话说明关键步骤。',
+      hints: stepHints(focus.indicator_id),
+      success_criteria: ['基本步骤正确', '能说明关键规则', '完成自检'],
+      next_if_success: '进入不同情境的迁移题。',
+      next_if_not: '回到二级提示，只改卡点步骤，不重抄整题。',
+      teacher_only: teacherOnlyFor([{ item_id: practice }], questions)
+    },
+    {
+      step_no: 4,
+      phase: '迁移与检验',
+      objective: '换情境或换问法后仍能使用同一规则，并完成检查。',
+      item_refs: [transfer],
+      material_refs: materialRefs(focus.indicator_id),
+      student_action: '完成后必须写出一个检查动作：代值、回代、数轴核对或结合实际条件解释。',
+      hints: stepHints(focus.indicator_id),
+      success_criteria: ['迁移题结果正确', '检查动作与题型匹配', '能解释结果是否合理'],
+      next_if_success: '进入反思和下一次观察。',
+      next_if_not: '暂停新题，回到学习卡并降低一个认知步骤。',
+      teacher_only: teacherOnlyFor([{ item_id: transfer }], questions)
+    },
+    {
+      step_no: 5,
+      phase: '反思与退出',
+      objective: '把一次正确表现转成可复用的自检语言。',
+      item_refs: [],
+      student_action: '填写两句话：这次最容易错的地方是____；下次开始前我先检查____。',
+      hints: [
+        makeHint(1, '回看第2步和第4步，比较自己在哪一步使用了提示。', '形成自我监控', 'student', false),
+        makeHint(2, '把“粗心”改写成具体动作，例如检查符号、端点、单位或回代。', '形成可执行检查', 'student', false),
+        makeHint(3, '请教师根据本次提示层级决定下一题难度。', '交给教师调整', 'student', false)
+      ],
+      success_criteria: ['反思包含具体步骤', '下一次计划有明确观察点'],
+      next_if_success: '按调整规则决定是否结束本指标强化。',
+      next_if_not: '保留原计划再练一题，不立即切换主题。'
+    }
+  ];
+  const hintLeaks = [];
+  for (const step of steps) {
+    const stepQuestions = (step.item_refs ?? []).map((itemId) => questions.get(itemId)).filter(Boolean);
+    for (const hint of step.hints) {
+      if (stepQuestions.length === 0) {
+        const reason = detectStudentHintLeak(hint.text, null);
+        if (reason) hintLeaks.push({ step_no: step.step_no, reason });
+      } else {
+        for (const question of stepQuestions) {
+          const reason = detectStudentHintLeak(hint.text, question);
+          if (reason) hintLeaks.push({ step_no: step.step_no, item_id: question.item_id, reason });
+        }
+      }
+    }
+  }
   return {
     schema_version: PLAN_SCHEMA_VERSION,
     plan_id: 'PLAN-' + request.student.id + '-' + focus.indicator_id.toLowerCase() + '-' + generatedAt.slice(0, 10).replaceAll('-', ''),
     generated_at: generatedAt,
-    module: { name: '个性化建议与分步辅导', owner: '王振宇', version: '1.0.0' },
+    module: { name: '个性化建议与分步辅导', owner: '王振宇', version: '1.1.0' },
     student: { id: request.student.id, class_id: request.student.class_id },
+    target_node_id: targetNodeId,
     plan_kind: planKind,
     certainty,
     primary_focus: {
@@ -357,82 +634,17 @@ export function buildLearningPlan(request, generatedAt = new Date().toISOString(
     evidence_used: rated.map((x) => itemSummary(x, questions)),
     evidence_gaps: evidenceGaps,
     material_refs: materialRefs(focus.indicator_id),
-    steps: [
-      {
-        step_no: 1,
-        phase: '概念复位',
-        objective: '用学习卡恢复规则和观察顺序，不直接解题。',
-        item_refs: [],
-        material_refs: materialRefs(focus.indicator_id),
-        student_action: '读学习卡，用自己的话说出本指标最关键的一条规则，并圈出关键词。',
-        hints: stepHints(focus.indicator_id, '先不要算结果；按“看条件—选规则—写下一步”的顺序说一遍。'),
-        success_criteria: ['能说出规则而不看答案', '能指出题目中触发该规则的词或符号'],
-        next_if_success: '进入原题复盘。',
-        next_if_not: '教师用学习卡中的最小例子示范一次，再让学生复述。'
-      },
-      {
-        step_no: 2,
-        phase: '原题复盘',
-        objective: '定位首次出错步骤，而不是重做整题。',
-        item_refs: [review.item_id].filter(Boolean),
-        material_refs: materialRefs(focus.indicator_id),
-        student_action: '标出自己第一次不确定的步骤，说明当时依据的规则；使用一级提示后尝试修正该步。',
-        hints: stepHints(focus.indicator_id, '只检查当前这一步：你依据的是哪条规则？符号或方向在这一步有没有变化？'),
-        success_criteria: ['能指出具体卡点', '能按规则修正当前步骤并说明理由'],
-        next_if_success: '进入同类独立练习。',
-        next_if_not: '下降到三级提示，用代值或反向运算核对这一步。',
-        teacher_only: teacherOnlyFor(reviewForTeacher, questions)
-      },
-      {
-        step_no: 3,
-        phase: '独立练习',
-        objective: '在同类题中独立迁移同一规则。',
-        item_refs: [practice],
-        material_refs: materialRefs(focus.indicator_id),
-        student_action: '独立完成，不先看提示；完成后用一句话说明关键步骤。',
-        hints: stepHints(focus.indicator_id),
-        success_criteria: ['基本步骤正确', '能说明关键规则', '完成自检'],
-        next_if_success: '进入不同情境的迁移题。',
-        next_if_not: '回到二级提示，只改卡点步骤，不重抄整题。',
-        teacher_only: teacherOnlyFor([{ item_id: practice }], questions)
-      },
-      {
-        step_no: 4,
-        phase: '迁移与检验',
-        objective: '换情境或换问法后仍能使用同一规则，并完成检查。',
-        item_refs: [transfer],
-        material_refs: materialRefs(focus.indicator_id),
-        student_action: '完成后必须写出一个检查动作：代值、回代、数轴核对或结合实际条件解释。',
-        hints: stepHints(focus.indicator_id),
-        success_criteria: ['迁移题结果正确', '检查动作与题型匹配', '能解释结果是否合理'],
-        next_if_success: '进入反思和下一次观察。',
-        next_if_not: '暂停新题，回到学习卡并降低一个认知步骤。',
-        teacher_only: teacherOnlyFor([{ item_id: transfer }], questions)
-      },
-      {
-        step_no: 5,
-        phase: '反思与退出',
-        objective: '把一次正确表现转成可复用的自检语言。',
-        item_refs: [],
-        student_action: '填写两句话：这次最容易错的地方是____；下次开始前我先检查____。',
-        hints: [
-          makeHint(1, '回看第2步和第4步，比较自己在哪一步使用了提示。', '形成自我监控', 'student', false),
-          makeHint(2, '把“粗心”改写成具体动作，例如检查符号、端点、单位或回代。', '形成可执行检查', 'student', false),
-          makeHint(3, '请教师根据本次提示层级决定下一题难度。', '交给教师调整', 'student', false)
-        ],
-        success_criteria: ['反思包含具体步骤', '下一次计划有明确观察点'],
-        next_if_success: '按调整规则决定是否结束本指标强化。',
-        next_if_not: '保留原计划再练一题，不立即切换主题。'
-      }
-    ],
+    steps,
     observation: indicator.observation,
     adjustment_rules: commonAdjustmentRules(focus.indicator_id),
     limitations,
     teacher_explanation: teacherOnlyFor([...reviewForTeacher, ...practiceForTeacher], questions),
     quality_checks: {
-      no_direct_answer_in_student_hints: true,
+      no_direct_answer_in_student_hints: hintLeaks.length === 0,
+      hint_leak_reasons: hintLeaks,
       uncertainty_explicit: true,
       evidence_ids: rated.map((x) => x.record_id),
+      input_context_valid: true,
       material_refs_present: true,
       adjustment_conditions_present: true
     }
@@ -440,20 +652,145 @@ export function buildLearningPlan(request, generatedAt = new Date().toISOString(
 }
 
 /** 基础质量检查，供页面、CLI 和验收脚本共用。 */
-export function validatePlan(plan) {
+export function validatePlan(plan, context = {}) {
   const errors = [];
   if (!plan || typeof plan !== 'object') return ['计划不是对象'];
   if (!plan.plan_id) errors.push('缺少 plan_id');
   if (!plan.student?.id) errors.push('缺少 student.id');
+
+  const questions = normalizeQuestions(context.questions ?? {});
+  for (const teacherItem of plan.teacher_explanation ?? []) {
+    if (teacherItem?.item_id && !questions.has(teacherItem.item_id) && teacherItem.answer) {
+      questions.set(teacherItem.item_id, {
+        item_id: teacherItem.item_id,
+        topic_id: '',
+        indicator_id: '',
+        type: '',
+        stem: teacherItem.stem ?? '',
+        answer: teacherItem.answer ?? '',
+        analysis: teacherItem.analysis ?? '',
+        max_score: null,
+        source: ''
+      });
+    }
+  }
+  const nodes = normalizeNodes(context.nodes ?? {});
+  const targetNodeId = plan.target_node_id ?? context.target_node_id ?? context.targetNodeId ?? null;
+  if (nodes.size > 0) {
+    if (!targetNodeId) errors.push('计划缺少目标节点');
+    else if (!nodes.has(targetNodeId)) errors.push('目标节点不存在: ' + targetNodeId);
+  }
+  const contextStudentId = context.student?.id ?? context.student_id ?? null;
+  if (contextStudentId && contextStudentId !== plan.student?.id) errors.push('计划学生与验证上下文不一致');
+  const contextTargetNodeId = context.target_node_id ?? context.targetNodeId ?? null;
+  if (contextTargetNodeId && targetNodeId && contextTargetNodeId !== targetNodeId) {
+    errors.push('计划目标节点与验证上下文不一致');
+  }
+
+  const sourceEvidence = Array.isArray(context.evidence)
+    ? context.evidence.map(normalizeEvidenceItem)
+    : null;
+  const evidenceRefs = [];
+  for (const item of plan.evidence_used ?? []) {
+    const label = item.source_ref || item.record_id || item.item_id || '(unknown)';
+    evidenceRefs.push(item.record_id || item.source_ref);
+    if (item.student_id !== plan.student?.id) errors.push(label + ': 证据不属于计划学生');
+    if (targetNodeId && item.node_id !== targetNodeId) errors.push(label + ': 证据不属于目标节点');
+    if (item.status !== STATUS_GRADED) errors.push(label + ': 非已评分证据不得进入计划');
+    const question = questions.get(item.item_id);
+    if (!question) errors.push(label + ': 题目不存在');
+    if (question) {
+      if (item.topic_id && question.topic_id && item.topic_id !== question.topic_id) errors.push(label + ': 证据主题与题库不一致');
+      if (item.indicator_id && question.indicator_id && item.indicator_id !== question.indicator_id) errors.push(label + ': 证据指标与题库不一致');
+      if (item.max_score !== null && question.max_score !== null && item.max_score !== question.max_score) errors.push(label + ': 证据满分与题库不一致');
+    }
+    if (item.score === null || item.max_score === null || item.score < 0 || item.score > item.max_score) {
+      errors.push(label + ': 证据得分无效');
+    }
+    if (nodes.size > 0) {
+      const node = nodes.get(item.node_id);
+      if (!node) errors.push(label + ': 证据节点不存在');
+      else if (!nodeAllowsItem(node, item.item_id)) errors.push(label + ': 题目不在节点允许题集内');
+    }
+    if (sourceEvidence) {
+      const source = sourceEvidence.find((candidate) => (
+        (candidate.record_id && candidate.record_id === (item.record_id || item.source_ref))
+        || (candidate.event_id && candidate.event_id === item.event_id)
+      ));
+      if (!source) {
+        errors.push(label + ': 验证上下文中不存在该证据');
+      } else {
+        if (source.student_id !== item.student_id) errors.push(label + ': 证据学生字段被篡改');
+        if (source.node_id !== item.node_id) errors.push(label + ': 证据节点字段被篡改');
+        if (source.item_id !== item.item_id) errors.push(label + ': 证据题目字段被篡改');
+        if (source.status !== item.status) errors.push(label + ': 证据状态字段被篡改');
+        if (source.score !== item.score) errors.push(label + ': 证据得分字段被篡改');
+        if (source.max_score !== item.max_score) errors.push(label + ': 证据满分字段被篡改');
+      }
+    }
+  }
+  const declaredEvidenceIds = plan.quality_checks?.evidence_ids;
+  if (Array.isArray(declaredEvidenceIds)) {
+    const actual = unique(evidenceRefs);
+    if (actual.join('|') !== declaredEvidenceIds.join('|')) errors.push('quality_checks.evidence_ids 与实际证据不一致');
+  }
+
   if (!Array.isArray(plan.steps) || plan.steps.length < 3) errors.push('步骤不足');
   for (const [index, step] of (plan.steps ?? []).entries()) {
     if (!step.student_action) errors.push('步骤' + (index + 1) + '缺少学生动作');
     if (!Array.isArray(step.hints)) errors.push('步骤' + (index + 1) + '缺少提示数组');
+    const stepQuestions = [];
+    for (const itemId of step.item_refs ?? []) {
+      const question = questions.get(itemId);
+      if (!question) errors.push('步骤' + (index + 1) + '引用不存在题目: ' + itemId);
+      else {
+        stepQuestions.push(question);
+        if (plan.primary_focus?.indicator_id && question.indicator_id && question.indicator_id !== plan.primary_focus.indicator_id) {
+          errors.push('步骤' + (index + 1) + '引用其他指标题目: ' + itemId);
+        }
+      }
+      if (nodes.size > 0 && !nodeAllowsItem(nodes.get(targetNodeId), itemId)) {
+        errors.push('步骤' + (index + 1) + '引用节点范围外题目: ' + itemId);
+      }
+    }
     for (const hint of step.hints ?? []) {
       if (hint.visibility !== 'student') errors.push('提示可见性错误');
       if (hint.reveals_answer !== false) errors.push('学生提示不得直接给答案');
-      if (/^答案[:：]/.test(hint.text)) errors.push('提示包含直接答案');
+      const reason = stepQuestions.length
+        ? stepQuestions.map((question) => detectStudentHintLeak(hint.text, question)).find(Boolean)
+        : detectStudentHintLeak(hint.text, null);
+      if (reason) errors.push('步骤' + (index + 1) + '学生提示泄题: ' + reason);
     }
+    for (const teacherItem of step.teacher_only ?? []) {
+      if (!questions.has(teacherItem.item_id)) errors.push('教师说明引用不存在题目: ' + teacherItem.item_id);
+      if (nodes.size > 0 && !nodeAllowsItem(nodes.get(targetNodeId), teacherItem.item_id)) {
+        errors.push('教师说明引用节点范围外题目: ' + teacherItem.item_id);
+      }
+    }
+  }
+
+  const knownMaterials = new Set(Object.values(TOPICS).flatMap((topic) => [topic.card, topic.textbook, topic.standard]));
+  const primaryMaterialIds = plan.primary_focus?.indicator_id
+    ? new Set(materialRefs(plan.primary_focus.indicator_id).map((ref) => ref.id))
+    : null;
+  const planMaterialIds = new Set((plan.material_refs ?? []).map((ref) => ref.id));
+  const materialCollections = [plan.material_refs ?? [], ...(plan.steps ?? []).map((step) => step.material_refs ?? [])];
+  for (const refs of materialCollections) {
+    for (const ref of refs) {
+      if (!ref?.id || !knownMaterials.has(ref.id)) errors.push('引用不存在材料: ' + (ref?.id ?? '(missing id)'));
+      if (primaryMaterialIds && !primaryMaterialIds.has(ref?.id)) errors.push('引用与首要指标不匹配的材料: ' + (ref?.id ?? '(missing id)'));
+      if (refs !== plan.material_refs && !planMaterialIds.has(ref?.id)) errors.push('步骤材料未纳入计划材料清单: ' + (ref?.id ?? '(missing id)'));
+    }
+  }
+  for (const teacherItem of plan.teacher_explanation ?? []) {
+    if (!questions.has(teacherItem.item_id)) errors.push('参考答案引用不存在题目: ' + teacherItem.item_id);
+    if (nodes.size > 0 && !nodeAllowsItem(nodes.get(targetNodeId), teacherItem.item_id)) {
+      errors.push('参考答案引用节点范围外题目: ' + teacherItem.item_id);
+    }
+  }
+
+  if (plan.quality_checks?.no_direct_answer_in_student_hints !== true) {
+    errors.push('质量检查未声明学生提示无泄题');
   }
   if (!Array.isArray(plan.adjustment_rules) || plan.adjustment_rules.length < 3) errors.push('调整条件不足');
   if (!Array.isArray(plan.limitations) || plan.limitations.length === 0) errors.push('缺少适用限制');

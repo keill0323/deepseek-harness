@@ -23,6 +23,8 @@ node competitions/smart-learning-companion/wang-zhenyu/scripts/build-example.mjs
 
 `src/recommendation-engine.mjs`、旧 `demo/` 及此前的验收文档保留为历史模块记录；它们不再被两个运行脚本调用，不代表当前版本的正式验收结果。完整教师报告及质量 CSV 包含本地证据，不得当作学生练习文件发放。学生练习下载使用页面专用的 JSON/CSV 白名单入口。
 
+历史独立 JS 引擎仍保留防护回归：`node --test competitions/smart-learning-companion/wang-zhenyu/tests/*.test.mjs` 覆盖证据学生/节点范围、题目与材料存在性、评分冲突不按编号改写、提示文本实际泄题检测和验证器复检；当前共16项合成测试。该测试用于守住历史模块边界，不替代统一主线 `npm run study:test`。
+
 ## 验证与真人复验
 
 仓库根目录 `npm run study:test` 验证主线与兼容入口，覆盖固定旧编号不再触发特殊改分、任意输入编号、节点不被迁移、逐字段 CSV/JSON 一致、拒绝覆盖和完整性检查。正式数据与跨语言对拍使用 `STUDY_DATA_DIR=本地CSV目录 sh modules/verify.sh`，不向模型输出正式记录。

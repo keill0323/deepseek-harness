@@ -1,20 +1,21 @@
 window.SMART_LEARNING_DATA = {
-  "generated_at": "2026-11-14T12:00:00+08:00",
+  "generated_at": "2026-11-15T12:00:00+08:00",
   "is_synthetic": true,
   "cases": {
     "S01": {
-      "schema_version": "1.0.0",
-      "plan_id": "PLAN-S01-t03i1-20261114",
-      "generated_at": "2026-11-14T12:00:00+08:00",
+      "schema_version": "1.1.0",
+      "plan_id": "PLAN-S01-t03i1-20261115",
+      "generated_at": "2026-11-15T12:00:00+08:00",
       "module": {
         "name": "个性化建议与分步辅导",
         "owner": "王振宇",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "student": {
         "id": "S01",
         "class_id": "SC01"
       },
+      "target_node_id": "N02",
       "plan_kind": "remediation",
       "certainty": "adequate",
       "primary_focus": {
@@ -30,8 +31,12 @@ window.SMART_LEARNING_DATA = {
       "summary": "已评分证据 3 条，当前得分率为 40%。本次优先处理“运用不等式性质求解，负数乘除时正确改变方向”。",
       "evidence_used": [
         {
+          "record_id": "XR01",
           "item_id": "Q043",
+          "student_id": "S01",
           "node_id": "N02",
+          "topic_id": "T03",
+          "indicator_id": "T03I1",
           "status": "已评分",
           "score": 1,
           "max_score": 3,
@@ -42,8 +47,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR01"
         },
         {
+          "record_id": "XR02",
           "item_id": "Q041",
+          "student_id": "S01",
           "node_id": "N02",
+          "topic_id": "T03",
+          "indicator_id": "T03I1",
           "status": "已评分",
           "score": 0,
           "max_score": 1,
@@ -54,8 +63,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR02"
         },
         {
+          "record_id": "XR03",
           "item_id": "Q039",
+          "student_id": "S01",
           "node_id": "N02",
+          "topic_id": "T03",
+          "indicator_id": "T03I1",
           "status": "已评分",
           "score": 1,
           "max_score": 1,
@@ -490,29 +503,32 @@ window.SMART_LEARNING_DATA = {
       ],
       "quality_checks": {
         "no_direct_answer_in_student_hints": true,
+        "hint_leak_reasons": [],
         "uncertainty_explicit": true,
         "evidence_ids": [
           "XR01",
           "XR02",
           "XR03"
         ],
+        "input_context_valid": true,
         "material_refs_present": true,
         "adjustment_conditions_present": true
       }
     },
     "S02": {
-      "schema_version": "1.0.0",
-      "plan_id": "PLAN-S02-t02i1-20261114",
-      "generated_at": "2026-11-14T12:00:00+08:00",
+      "schema_version": "1.1.0",
+      "plan_id": "PLAN-S02-t02i1-20261115",
+      "generated_at": "2026-11-15T12:00:00+08:00",
       "module": {
         "name": "个性化建议与分步辅导",
         "owner": "王振宇",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "student": {
         "id": "S02",
         "class_id": "SC01"
       },
+      "target_node_id": "N01",
       "plan_kind": "extension",
       "certainty": "adequate",
       "primary_focus": {
@@ -528,8 +544,12 @@ window.SMART_LEARNING_DATA = {
       "summary": "已评分证据 3 条，当前得分率为 85.7%。本次优先处理“运用等式性质解一元一次方程”。",
       "evidence_used": [
         {
+          "record_id": "XR11",
           "item_id": "Q026",
+          "student_id": "S02",
           "node_id": "N01",
+          "topic_id": "T02",
+          "indicator_id": "T02I1",
           "status": "已评分",
           "score": 0,
           "max_score": 1,
@@ -540,8 +560,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR11"
         },
         {
+          "record_id": "XR12",
           "item_id": "Q025",
+          "student_id": "S02",
           "node_id": "N01",
+          "topic_id": "T02",
+          "indicator_id": "T02I1",
           "status": "已评分",
           "score": 3,
           "max_score": 3,
@@ -552,8 +576,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR12"
         },
         {
+          "record_id": "XR13",
           "item_id": "Q022",
+          "student_id": "S02",
           "node_id": "N01",
+          "topic_id": "T02",
+          "indicator_id": "T02I1",
           "status": "已评分",
           "score": 3,
           "max_score": 3,
@@ -831,7 +859,7 @@ window.SMART_LEARNING_DATA = {
           "phase": "迁移与检验",
           "objective": "换情境或换问法后仍能使用同一规则，并完成检查。",
           "item_refs": [
-            "Q034"
+            "Q025"
           ],
           "material_refs": [
             {
@@ -886,10 +914,10 @@ window.SMART_LEARNING_DATA = {
           "next_if_not": "暂停新题，回到学习卡并降低一个认知步骤。",
           "teacher_only": [
             {
-              "item_id": "Q034",
-              "stem": "示例：用方程组解决票价问题。",
-              "answer": "示例答案",
-              "analysis": "示例解析：设未知数、列方程并检验。",
+              "item_id": "Q025",
+              "stem": "示例：解含分母的一元一次方程。",
+              "answer": "示例解",
+              "analysis": "示例解析：去分母后逐步化简。",
               "note": "仅供教师查看，学生端提示不得包含本字段。"
             }
           ]
@@ -979,69 +1007,59 @@ window.SMART_LEARNING_DATA = {
           "note": "仅供教师查看，学生端提示不得包含本字段。"
         },
         {
-          "item_id": "Q034",
-          "stem": "示例：用方程组解决票价问题。",
-          "answer": "示例答案",
-          "analysis": "示例解析：设未知数、列方程并检验。",
+          "item_id": "Q025",
+          "stem": "示例：解含分母的一元一次方程。",
+          "answer": "示例解",
+          "analysis": "示例解析：去分母后逐步化简。",
           "note": "仅供教师查看，学生端提示不得包含本字段。"
         }
       ],
       "quality_checks": {
         "no_direct_answer_in_student_hints": true,
+        "hint_leak_reasons": [],
         "uncertainty_explicit": true,
         "evidence_ids": [
           "XR11",
           "XR12",
           "XR13"
         ],
+        "input_context_valid": true,
         "material_refs_present": true,
         "adjustment_conditions_present": true
       }
     },
     "S03": {
-      "schema_version": "1.0.0",
-      "plan_id": "PLAN-S03-coverage-20261114",
-      "generated_at": "2026-11-14T12:00:00+08:00",
+      "schema_version": "1.1.0",
+      "plan_id": "PLAN-S03-coverage-20261115",
+      "generated_at": "2026-11-15T12:00:00+08:00",
       "module": {
         "name": "个性化建议与分步辅导",
         "owner": "王振宇",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "student": {
         "id": "S03",
         "class_id": "SC02"
       },
+      "target_node_id": "N02",
       "plan_kind": "coverage_probe",
       "certainty": "insufficient",
       "primary_focus": null,
       "summary": "现有证据只覆盖部分主题，先设计低负担观察任务，再决定后续强化方向。",
-      "evidence_used": [
+      "evidence_used": [],
+      "evidence_gaps": [
         {
-          "item_id": "Q009",
-          "node_id": "N01",
-          "status": "已评分",
-          "score": 3,
-          "max_score": 3,
-          "answer": "示例作答",
-          "steps": "示例步骤",
-          "point_scores": "Q009P1=1；Q009P2=1；Q009P3=1",
-          "stem": "示例：化简一个含括号的整式。",
-          "source_ref": "XR21"
+          "indicator_id": "T01I1",
+          "topic": "T01",
+          "name": "表示数量关系并代入求值",
+          "interpretation": "无已评分证据，不能判断掌握程度"
         },
         {
-          "item_id": "Q014",
-          "node_id": "N01",
-          "status": "已评分",
-          "score": 3,
-          "max_score": 3,
-          "answer": "示例作答",
-          "steps": "示例步骤",
-          "point_scores": "Q014P1=1；Q014P2=1；Q014P3=1",
-          "stem": "示例：用含x的整式表示总人数。",
-          "source_ref": "XR22"
-        }
-      ],
-      "evidence_gaps": [
+          "indicator_id": "T01I2",
+          "topic": "T01",
+          "name": "识别同类项、去括号并化简",
+          "interpretation": "无已评分证据，不能判断掌握程度"
+        },
         {
           "indicator_id": "T01I3",
           "topic": "T01",
@@ -1128,9 +1146,7 @@ window.SMART_LEARNING_DATA = {
           "step_no": 1,
           "phase": "确认已有优势",
           "objective": "用一题已掌握主题的题确认学生能独立说明步骤。",
-          "item_refs": [
-            "Q009"
-          ],
+          "item_refs": [],
           "student_action": "选择一题已经做过的题，口述“我先做什么、再做什么、最后怎样检查”。",
           "hints": [],
           "success_criteria": [
@@ -1335,10 +1351,10 @@ window.SMART_LEARNING_DATA = {
       "quality_checks": {
         "no_direct_answer_in_student_hints": true,
         "uncertainty_explicit": true,
-        "evidence_ids": [
-          "XR21",
-          "XR22"
-        ]
+        "evidence_ids": [],
+        "input_context_valid": true,
+        "material_refs_present": true,
+        "adjustment_conditions_present": true
       }
     }
   },
@@ -1361,18 +1377,19 @@ window.SMART_LEARNING_DATA = {
   },
   "all_plans": [
     {
-      "schema_version": "1.0.0",
-      "plan_id": "PLAN-S01-t03i1-20261114",
-      "generated_at": "2026-11-14T12:00:00+08:00",
+      "schema_version": "1.1.0",
+      "plan_id": "PLAN-S01-t03i1-20261115",
+      "generated_at": "2026-11-15T12:00:00+08:00",
       "module": {
         "name": "个性化建议与分步辅导",
         "owner": "王振宇",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "student": {
         "id": "S01",
         "class_id": "SC01"
       },
+      "target_node_id": "N02",
       "plan_kind": "remediation",
       "certainty": "adequate",
       "primary_focus": {
@@ -1388,8 +1405,12 @@ window.SMART_LEARNING_DATA = {
       "summary": "已评分证据 3 条，当前得分率为 40%。本次优先处理“运用不等式性质求解，负数乘除时正确改变方向”。",
       "evidence_used": [
         {
+          "record_id": "XR01",
           "item_id": "Q043",
+          "student_id": "S01",
           "node_id": "N02",
+          "topic_id": "T03",
+          "indicator_id": "T03I1",
           "status": "已评分",
           "score": 1,
           "max_score": 3,
@@ -1400,8 +1421,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR01"
         },
         {
+          "record_id": "XR02",
           "item_id": "Q041",
+          "student_id": "S01",
           "node_id": "N02",
+          "topic_id": "T03",
+          "indicator_id": "T03I1",
           "status": "已评分",
           "score": 0,
           "max_score": 1,
@@ -1412,8 +1437,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR02"
         },
         {
+          "record_id": "XR03",
           "item_id": "Q039",
+          "student_id": "S01",
           "node_id": "N02",
+          "topic_id": "T03",
+          "indicator_id": "T03I1",
           "status": "已评分",
           "score": 1,
           "max_score": 1,
@@ -1848,29 +1877,32 @@ window.SMART_LEARNING_DATA = {
       ],
       "quality_checks": {
         "no_direct_answer_in_student_hints": true,
+        "hint_leak_reasons": [],
         "uncertainty_explicit": true,
         "evidence_ids": [
           "XR01",
           "XR02",
           "XR03"
         ],
+        "input_context_valid": true,
         "material_refs_present": true,
         "adjustment_conditions_present": true
       }
     },
     {
-      "schema_version": "1.0.0",
-      "plan_id": "PLAN-S02-t02i1-20261114",
-      "generated_at": "2026-11-14T12:00:00+08:00",
+      "schema_version": "1.1.0",
+      "plan_id": "PLAN-S02-t02i1-20261115",
+      "generated_at": "2026-11-15T12:00:00+08:00",
       "module": {
         "name": "个性化建议与分步辅导",
         "owner": "王振宇",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "student": {
         "id": "S02",
         "class_id": "SC01"
       },
+      "target_node_id": "N01",
       "plan_kind": "extension",
       "certainty": "adequate",
       "primary_focus": {
@@ -1886,8 +1918,12 @@ window.SMART_LEARNING_DATA = {
       "summary": "已评分证据 3 条，当前得分率为 85.7%。本次优先处理“运用等式性质解一元一次方程”。",
       "evidence_used": [
         {
+          "record_id": "XR11",
           "item_id": "Q026",
+          "student_id": "S02",
           "node_id": "N01",
+          "topic_id": "T02",
+          "indicator_id": "T02I1",
           "status": "已评分",
           "score": 0,
           "max_score": 1,
@@ -1898,8 +1934,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR11"
         },
         {
+          "record_id": "XR12",
           "item_id": "Q025",
+          "student_id": "S02",
           "node_id": "N01",
+          "topic_id": "T02",
+          "indicator_id": "T02I1",
           "status": "已评分",
           "score": 3,
           "max_score": 3,
@@ -1910,8 +1950,12 @@ window.SMART_LEARNING_DATA = {
           "source_ref": "XR12"
         },
         {
+          "record_id": "XR13",
           "item_id": "Q022",
+          "student_id": "S02",
           "node_id": "N01",
+          "topic_id": "T02",
+          "indicator_id": "T02I1",
           "status": "已评分",
           "score": 3,
           "max_score": 3,
@@ -2189,7 +2233,7 @@ window.SMART_LEARNING_DATA = {
           "phase": "迁移与检验",
           "objective": "换情境或换问法后仍能使用同一规则，并完成检查。",
           "item_refs": [
-            "Q034"
+            "Q025"
           ],
           "material_refs": [
             {
@@ -2244,10 +2288,10 @@ window.SMART_LEARNING_DATA = {
           "next_if_not": "暂停新题，回到学习卡并降低一个认知步骤。",
           "teacher_only": [
             {
-              "item_id": "Q034",
-              "stem": "示例：用方程组解决票价问题。",
-              "answer": "示例答案",
-              "analysis": "示例解析：设未知数、列方程并检验。",
+              "item_id": "Q025",
+              "stem": "示例：解含分母的一元一次方程。",
+              "answer": "示例解",
+              "analysis": "示例解析：去分母后逐步化简。",
               "note": "仅供教师查看，学生端提示不得包含本字段。"
             }
           ]
@@ -2337,69 +2381,59 @@ window.SMART_LEARNING_DATA = {
           "note": "仅供教师查看，学生端提示不得包含本字段。"
         },
         {
-          "item_id": "Q034",
-          "stem": "示例：用方程组解决票价问题。",
-          "answer": "示例答案",
-          "analysis": "示例解析：设未知数、列方程并检验。",
+          "item_id": "Q025",
+          "stem": "示例：解含分母的一元一次方程。",
+          "answer": "示例解",
+          "analysis": "示例解析：去分母后逐步化简。",
           "note": "仅供教师查看，学生端提示不得包含本字段。"
         }
       ],
       "quality_checks": {
         "no_direct_answer_in_student_hints": true,
+        "hint_leak_reasons": [],
         "uncertainty_explicit": true,
         "evidence_ids": [
           "XR11",
           "XR12",
           "XR13"
         ],
+        "input_context_valid": true,
         "material_refs_present": true,
         "adjustment_conditions_present": true
       }
     },
     {
-      "schema_version": "1.0.0",
-      "plan_id": "PLAN-S03-coverage-20261114",
-      "generated_at": "2026-11-14T12:00:00+08:00",
+      "schema_version": "1.1.0",
+      "plan_id": "PLAN-S03-coverage-20261115",
+      "generated_at": "2026-11-15T12:00:00+08:00",
       "module": {
         "name": "个性化建议与分步辅导",
         "owner": "王振宇",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "student": {
         "id": "S03",
         "class_id": "SC02"
       },
+      "target_node_id": "N02",
       "plan_kind": "coverage_probe",
       "certainty": "insufficient",
       "primary_focus": null,
       "summary": "现有证据只覆盖部分主题，先设计低负担观察任务，再决定后续强化方向。",
-      "evidence_used": [
+      "evidence_used": [],
+      "evidence_gaps": [
         {
-          "item_id": "Q009",
-          "node_id": "N01",
-          "status": "已评分",
-          "score": 3,
-          "max_score": 3,
-          "answer": "示例作答",
-          "steps": "示例步骤",
-          "point_scores": "Q009P1=1；Q009P2=1；Q009P3=1",
-          "stem": "示例：化简一个含括号的整式。",
-          "source_ref": "XR21"
+          "indicator_id": "T01I1",
+          "topic": "T01",
+          "name": "表示数量关系并代入求值",
+          "interpretation": "无已评分证据，不能判断掌握程度"
         },
         {
-          "item_id": "Q014",
-          "node_id": "N01",
-          "status": "已评分",
-          "score": 3,
-          "max_score": 3,
-          "answer": "示例作答",
-          "steps": "示例步骤",
-          "point_scores": "Q014P1=1；Q014P2=1；Q014P3=1",
-          "stem": "示例：用含x的整式表示总人数。",
-          "source_ref": "XR22"
-        }
-      ],
-      "evidence_gaps": [
+          "indicator_id": "T01I2",
+          "topic": "T01",
+          "name": "识别同类项、去括号并化简",
+          "interpretation": "无已评分证据，不能判断掌握程度"
+        },
         {
           "indicator_id": "T01I3",
           "topic": "T01",
@@ -2486,9 +2520,7 @@ window.SMART_LEARNING_DATA = {
           "step_no": 1,
           "phase": "确认已有优势",
           "objective": "用一题已掌握主题的题确认学生能独立说明步骤。",
-          "item_refs": [
-            "Q009"
-          ],
+          "item_refs": [],
           "student_action": "选择一题已经做过的题，口述“我先做什么、再做什么、最后怎样检查”。",
           "hints": [],
           "success_criteria": [
@@ -2693,10 +2725,10 @@ window.SMART_LEARNING_DATA = {
       "quality_checks": {
         "no_direct_answer_in_student_hints": true,
         "uncertainty_explicit": true,
-        "evidence_ids": [
-          "XR21",
-          "XR22"
-        ]
+        "evidence_ids": [],
+        "input_context_valid": true,
+        "material_refs_present": true,
+        "adjustment_conditions_present": true
       }
     }
   ],
@@ -2757,6 +2789,8 @@ window.SMART_LEARNING_DATA = {
     "raw_rows": 8,
     "event_count": 8,
     "revision_count": 0,
+    "analysis_eligible_count": 8,
+    "review_required_count": 0,
     "pending": 0,
     "unanswered": 0,
     "anomalies": 0
