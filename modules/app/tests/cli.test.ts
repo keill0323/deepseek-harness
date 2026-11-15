@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile, unlink } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, unlink, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,20 @@ import { make_input } from '../../data/tests/helpers.ts'
 import { csv_payload } from './csv-helpers.ts'
 
 const builtCli = fileURLToPath(new URL('../../data/lib/companion/app/cli.js', import.meta.url))
+
+test('source and built CLI execute when launched through a linked modules directory', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'study-linked-cli-'))
+  t.after(async () => { await rm(directory, { recursive: true, force: true }) })
+  await symlink(fileURLToPath(new URL('../../', import.meta.url)), join(directory, 'modules'), process.platform === 'win32' ? 'junction' : 'dir')
+  for (const entry of ['modules/app/cli.ts', 'modules/data/lib/companion/app/cli.js']) {
+    const result = spawnSync(process.execPath, [join(directory, entry), '--help'], { encoding: 'utf8', timeout: 20000 })
+    assert.ifError(result.error)
+    assert.equal(result.signal, null)
+    assert.equal(result.status, 0)
+    assert.equal(result.stderr, '')
+    assert.match(result.stdout, /智慧学伴完整本地工具/u, 'an exit code of zero must not hide an unexecuted entry point')
+  }
+})
 
 function run(args: string[]): { status: number | null; output: Record<string, unknown> } {
   const result = spawnSync(process.execPath, [builtCli, ...args], { encoding: 'utf8', timeout: 20000 })
