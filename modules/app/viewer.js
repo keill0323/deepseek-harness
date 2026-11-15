@@ -233,7 +233,7 @@ function vOverview() {
 function vStatistics(stats) {
   return vMetrics([
     { label: '有效作答得分率', value: vRate(stats.score_rate), detail: stats.possible_score === null ? '缺记录保持未知' : `${stats.earned_score} / ${stats.possible_score} 分` },
-    { label: '有效 / 已有记录', value: `${stats.valid_record_count} / ${stats.record_count}`, detail: '待评分与复核项不计分' },
+    { label: '有效 / 已有记录', value: `${stats.valid_record_count} / ${stats.record_count}`, detail: '语义复核可保留原分，结构冲突暂不计分' },
     { label: '已观察指标', value: stats.indicators.filter(indicator => indicator.valid_record_count > 0).length, detail: `共 ${stats.indicators.length} 个课程观察指标` },
     { label: '评分待复核', value: stats.review_record_ids.length, detail: '不由疑点推断知识漏洞' },
   ])
@@ -395,7 +395,7 @@ function vComparison() {
   const reasonNames = { no_valid_left_sample: '左侧无有效样本', no_valid_right_sample: '右侧无有效样本' }
   if (payload.excluded_items.length) vMain.append(vEl('details', 'limitations', vEl('summary', '', `查看 ${payload.excluded_items.length} 道移除题目及理由`),
     vTable([{ label: '题目', render: row => row.item_id }, { label: '移除理由', render: row => row.reason_codes.map(reason => reasonNames[reason] ?? reason).join('；') }], payload.excluded_items)))
-  if (payload.quality_record_ids.length) vMain.append(vPanel('范围内评分待复核', '以下记录未参加比较。', vEvidenceLinks(payload.quality_record_ids)))
+  if (payload.quality_record_ids.length) vMain.append(vPanel('范围内评分待复核', '以下记录需要复核，计分与共同题集情况见处理说明。', vEvidenceLinks(payload.quality_record_ids)))
   vMain.append(vLimitations(result))
 }
 

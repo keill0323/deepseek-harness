@@ -9,6 +9,7 @@ import { make_demo_input } from '../demo.ts'
 import { prepare_workspace_dataset } from '../pipeline.ts'
 import { csv_payload } from './csv-helpers.ts'
 import { parse_csv } from '../../data/io.ts'
+import { make_input, make_record } from '../../data/tests/helpers.ts'
 
 type DownloadBlob = InstanceType<Window['Blob']>
 interface Download { filename: string; blob: DownloadBlob }
@@ -84,6 +85,37 @@ function choose(window: Window, label: string, value: string): void {
 function mainText(window: Window): string {
   return window.document.querySelector('main')?.textContent ?? ''
 }
+
+test('comparison review copy agrees with the displayed population and JSON/CSV exports', async t => {
+  const input = make_input([
+    make_record({ 得分: '0', 学生最终作答: '3', 评分点得分: 'A1P1=0；A1P2=0；A1P3=0' }),
+    make_record({ 记录编号: 'R2', 作答事件编号: 'E2', 学生编号: 'S2', 得分: '3', 学生最终作答: '3', 评分点得分: 'A1P1=1；A1P2=1；A1P3=1' }),
+  ])
+  const { window, downloads } = await setup(t, input)
+  click(window, '比较分析')
+  choose(window, '测验节点', 'M1')
+  const retained = '本次范围内有 1 条待复核记录：1 条按有效分值参与比较，0 条未满足计分条件被排除，0 条可计分但不在共同有效题集中。'
+  assert.ok(mainText(window).includes(retained))
+  assert.ok(mainText(window).includes('以下记录需要复核，计分与共同题集情况见处理说明。'))
+  assert.ok(!mainText(window).includes('以下记录未参加比较。'))
+  click(window, '导出当前 JSON')
+  const json = JSON.parse(await downloads.at(-1)!.blob.text())
+  assert.ok(json.evidence_ids.includes('R1'))
+  assert.equal(json.payload.left_rate, 0)
+  assert.ok(json.limitations.includes(retained))
+  click(window, '导出当前 CSV')
+  const csv = await downloads.at(-1)!.blob.text()
+  assert.deepEqual(JSON.parse(parse_csv(csv, 'review.csv')[0]!['limitations_json']!), json.limitations)
+  assert.deepEqual(csv_payload(csv), json.payload)
+  choose(window, '比较方式', 'classes')
+  assert.ok(mainText(window).includes('本次范围内有 1 条待复核记录：0 条按有效分值参与比较，0 条未满足计分条件被排除，1 条可计分但不在共同有效题集中。'))
+  choose(window, '测验节点', 'M2')
+  assert.ok(!mainText(window).includes('待复核'))
+  click(window, '学生诊断')
+  choose(window, '测验节点', 'M1')
+  assert.ok(mainText(window).includes('语义复核可保留原分，结构冲突暂不计分'))
+  assert.ok(!mainText(window).includes('待评分与复核项不计分'))
+})
 
 test('current CSV matches the selected JSON after comparison and class scope changes', async t => {
   const { window, downloads } = await setup(t)
