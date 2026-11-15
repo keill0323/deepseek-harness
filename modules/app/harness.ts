@@ -10,6 +10,7 @@ import { check_export } from './check-export.ts'
 import { execute_operation } from './core.ts'
 import { make_demo_input } from './demo.ts'
 import { prepare_workspace_dataset } from './pipeline.ts'
+import { is_generated_at } from '../data/time.ts'
 
 const sourceRoot = new URL('../../', import.meta.url)
 const SOURCE_ROOT = fileURLToPath(existsSync(new URL('package.json', sourceRoot)) ? sourceRoot : new URL('../../../../../', import.meta.url))
@@ -23,6 +24,23 @@ const REQUESTS = {
 function object(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_SESSION_RECORD')
   return value as Record<string, unknown>
+}
+
+/**
+ * Recompute a real CLI result using its validated batch time, preserving every other field.
+ * @param actual - Parsed result written by the Harness-invoked CLI.
+ * @param operation - Requested business operation.
+ * @param request - Synthetic request supplied to that operation.
+ * @param startedAt - Observed Harness launch time in milliseconds.
+ * @param finishedAt - Observed Harness completion time in milliseconds.
+ * @returns Nothing; stale timestamps or different business results throw.
+ */
+export function verify_harness_result(actual: unknown, operation: string, request: Record<string, unknown>, startedAt: number, finishedAt: number): void {
+  const generated_at = object(actual)['generated_at']
+  if (!is_generated_at(generated_at) || Date.parse(generated_at) < startedAt || Date.parse(generated_at) > finishedAt) throw new Error('OPERATION_TIMESTAMP_INVALID')
+  const dataset = prepare_workspace_dataset(make_demo_input(), { source_mode: 'fixture', generated_at })
+  const expected = execute_operation(dataset, operation, request)
+  if (!isDeepStrictEqual(actual, JSON.parse(JSON.stringify(expected)))) throw new Error('OPERATION_RESULT_MISMATCH')
 }
 
 /**
@@ -139,7 +157,9 @@ export async function run_harness_cli(args: string[]): Promise<number> {
     const baseUrl = process.env['DEEPSEEK_BASE_URL'] || configured['DEEPSEEK_BASE_URL']
     if (baseUrl) env['DEEPSEEK_BASE_URL'] = baseUrl
     const task = '使用已发现的 study-companion Skill 完成一次合成数据联调。先通过 skill 工具加载它。工作目录中 modules 是已构建的项目业务模块；输入位于 tmp/study-data/fixture/input，全部为自编合成数据。不要读取输入CSV、报告正文或凭据，不修改代码，也不创建子代理。用现有 CLI 依次执行 requests/ 下四个请求文件，操作名与文件名相同，输出到 tmp/study-data/results/<操作名>.json；再导出完整报告到 tmp/study-data/report。所有调用须使用 --fixture --summary-only，保留已有 fixture/report。最后只返回操作状态与新报告 index.html 路径。'
+    const startedAt = Date.now()
     const code = await runChild(process.execPath, [dshBin, '--profile', 'headless', '--patch', patch, '--json', '--approval-policy', 'never', task], workspace, env, join(directory, 'run'), 240000)
+    const finishedAt = Date.now()
     const stream = await jsonLines(join(directory, 'run.jsonl'))
     const opening = object(stream[0])
     const sessionId = opening['sessionId']
@@ -151,11 +171,12 @@ export async function run_harness_cli(args: string[]): Promise<number> {
     verify_harness_events(stream, persisted, code)
     const report = join(workspace, 'tmp/study-data/report')
     if (!await check_export(report, 'fixture')) throw new Error('REPORT_VERIFICATION_FAILED')
-    const dataset = prepare_workspace_dataset(make_demo_input(), { source_mode: 'fixture' })
+    const manifest = object(JSON.parse(await readFile(join(report, 'manifest.json'), 'utf8')))
+    const reportTime = manifest['generated_at']
+    if (!is_generated_at(reportTime) || Date.parse(reportTime) < startedAt || Date.parse(reportTime) > finishedAt) throw new Error('REPORT_TIMESTAMP_INVALID')
     for (const [operation, request] of Object.entries(REQUESTS)) {
       const actual = JSON.parse(await readFile(join(workspace, 'tmp/study-data/results', `${operation}.json`), 'utf8'))
-      const expected = execute_operation(dataset, operation, request)
-      if (!isDeepStrictEqual(actual, JSON.parse(JSON.stringify(expected)))) throw new Error('OPERATION_RESULT_MISMATCH')
+      verify_harness_result(actual, operation, request, startedAt, finishedAt)
     }
     const result = { status: 'passed', verification: 'real_harness_session', session_id: sessionId,
       runtime_version: runtime['version'], skill_sha256: createHash('sha256').update(skill).digest('hex'), operations: Object.keys(REQUESTS),

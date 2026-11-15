@@ -9,6 +9,7 @@ import { make_input, make_record } from '../../data/tests/helpers.ts'
 import { build_workspace } from '../core.ts'
 import { prepare_workspace_dataset } from '../pipeline.ts'
 import { check_export } from '../check-export.ts'
+import { is_generated_at } from '../../data/time.ts'
 import { csv_exports, result_to_csv } from '../csv.ts'
 
 const script = fileURLToPath(new URL('../../../competitions/smart-learning-companion/wang-zhenyu/scripts/build-deliverable.mjs', import.meta.url))
@@ -41,11 +42,14 @@ test('legacy live entry uses the shared policy even for formerly hardcoded recor
   assert.equal(dataset.current.find(row => row.record_id === 'DR0515')!.node_id, 'M1')
   assert.equal(dataset.current.find(row => row.record_id === 'DR0515')!.include_in_statistics, false)
   assert.equal(dataset.current.find(row => row.record_id === 'UNLISTED-CONFLICT')!.corrected?.score, 3)
-  const expected = build_workspace(dataset), out = join(directory, 'legacy')
+  const out = join(directory, 'legacy')
   const result = invoke(script, ['--data', directory, '--out', out, '--fixture'])
   assert.equal(result.status, 0)
-  assert.deepEqual(Object.keys(result.output).sort(), ['engine', 'manifest_path', 'output_directory', 'report_path', 'result_status'])
-  assert.deepEqual(JSON.parse(await readFile(join(out, 'workspace.json'), 'utf8')), JSON.parse(JSON.stringify(expected)))
+  assert.deepEqual(Object.keys(result.output).sort(), ['engine', 'generated_at', 'manifest_path', 'output_directory', 'report_path', 'result_status'])
+  const actual = JSON.parse(await readFile(join(out, 'workspace.json'), 'utf8'))
+  assert.ok(is_generated_at(actual.generated_at))
+  const expected = build_workspace(prepare_workspace_dataset(input, { source_mode: 'fixture', generated_at: actual.generated_at }))
+  assert.deepEqual(actual, JSON.parse(JSON.stringify(expected)))
   for (const [name, envelope] of csv_exports(expected)) assert.equal(await readFile(join(out, 'csv', name), 'utf8'), result_to_csv(envelope))
   assert.equal(await check_export(out, 'fixture'), true)
   for (const [name, content] of contents) assert.equal(await readFile(join(directory, name), 'utf8'), content)

@@ -18,7 +18,7 @@ function quote(value: string): string { return `"${value.replaceAll('"', '""')}"
  */
 export function result_to_csv(result: ResultEnvelope<unknown>): string {
   const metadata: CsvRow = {
-    csv_format: CSV_FORMAT, schema_version: result.schema_version, dataset_version: result.dataset_version,
+    csv_format: CSV_FORMAT, generated_at: result.generated_at, schema_version: result.schema_version, dataset_version: result.dataset_version,
     policy_version: result.policy_version, producer_version: result.producer_version, source_mode: result.source_mode,
     result_status: result.result_status, scope_json: JSON.stringify(result.scope),
     evidence_ids_json: JSON.stringify(result.evidence_ids), limitations_json: JSON.stringify(result.limitations),

@@ -24,7 +24,7 @@ export async function check_export(directory: string, sourceMode: 'live' | 'fixt
     // The complete stored report is validated below, including version, scope and evidence checks.
     const workspace = content as ResultEnvelope<WorkspacePayload>
     if (workspace.source_mode !== sourceMode || workspace.result_status === 'error') return false
-    for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version'] as const) {
+    for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'generated_at'] as const) {
       if (!(key in manifest) || Reflect.get(manifest, key) !== workspace[key]) return false
     }
     const current = verify_workspace(workspace)
@@ -37,7 +37,8 @@ export async function check_export(directory: string, sourceMode: 'live' | 'fixt
       || !('csv_format' in manifest) || manifest.csv_format !== CSV_FORMAT
       || !('csv_files' in manifest) || !isDeepStrictEqual(manifest.csv_files, csvFiles.map(([name]) => `csv/${name}`))) return false
     for (const [name, entry] of csvFiles) if (await readFile(join(directory, 'csv', name), 'utf8') !== result_to_csv(entry)) return false
-    await json('fields.json')
+    const fields = await json('fields.json')
+    if (!fields || typeof fields !== 'object' || !('generated_at' in fields) || fields.generated_at !== workspace.generated_at) return false
     const html = await readFile(join(directory, 'index.html'), 'utf8')
     return 'report_sha256' in manifest && manifest.report_sha256 === createHash('sha256').update(html).digest('hex') && html.startsWith('<!doctype html>') && html.includes('</html>')
   } catch (error) {

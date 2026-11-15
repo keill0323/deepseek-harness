@@ -10,6 +10,8 @@ import { build_workspace } from '../core.ts'
 import { render_report } from '../report.ts'
 import { check_export } from '../check-export.ts'
 import { make_input } from '../../data/tests/helpers.ts'
+import { is_generated_at } from '../../data/time.ts'
+import { parse_csv } from '../../data/io.ts'
 import { csv_payload } from './csv-helpers.ts'
 
 const builtCli = fileURLToPath(new URL('../../data/lib/companion/app/cli.js', import.meta.url))
@@ -37,6 +39,17 @@ function run(args: string[]): { status: number | null; output: Record<string, un
   return { status: result.status, output: output as Record<string, unknown> }
 }
 
+function assert_same_csv_batch(actual: string, expected: string): void {
+  const normalize = (text: string) => {
+    const rows = parse_csv(text, 'batch.csv')
+    const timestamp = rows[0]!['generated_at']
+    assert.ok(is_generated_at(timestamp))
+    assert.ok(rows.every(row => row['generated_at'] === timestamp))
+    return rows.map(({ generated_at, ...row }) => row)
+  }
+  assert.deepEqual(normalize(actual), normalize(expected))
+}
+
 test('compiled export and privacy-preserving requests create reviewable local artifacts', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'study-complete-cli-'))
   t.after(async () => { await rm(directory, { recursive: true, force: true }) })
@@ -51,19 +64,23 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   await writeFile(requestPath, JSON.stringify({ student_id: 'S1', node_id: 'M1' }), 'utf8')
   const request = run(['run', '--data', directory, '--operation', 'get_student_stats', '--request-file', requestPath, '--out', resultPath, '--summary-only', '--fixture'])
   assert.equal(request.status, 0)
-  assert.deepEqual(Object.keys(request.output).sort(), ['engine', 'operation', 'result_path', 'result_status'])
+  assert.deepEqual(Object.keys(request.output).sort(), ['engine', 'generated_at', 'operation', 'result_path', 'result_status'])
   assert.ok(!JSON.stringify(request.output).includes('"S1"'))
   const privateResult = JSON.parse(await readFile(resultPath, 'utf8'))
+  assert.ok(is_generated_at(privateResult.generated_at))
+  assert.equal(privateResult.generated_at, request.output['generated_at'])
   assert.equal(privateResult.payload.student_id, 'S1')
   assert.equal(privateResult.payload.earned_score, 1)
   const refused = run(['run', '--data', directory, '--operation', 'get_student_stats', '--summary-only'])
   assert.equal(refused.status, 1)
-  assert.deepEqual(Object.keys(refused.output).sort(), ['engine', 'error', 'result_status'])
+  assert.deepEqual(Object.keys(refused.output).sort(), ['engine', 'error', 'generated_at', 'result_status'])
   const exportDirectory = join(directory, 'report')
   const exported = run(['export', '--data', directory, '--out', exportDirectory, '--summary-only', '--fixture'])
   assert.equal(exported.status, 0)
-  assert.deepEqual(Object.keys(exported.output).sort(), ['engine', 'manifest_path', 'output_directory', 'report_path', 'result_status'])
+  assert.deepEqual(Object.keys(exported.output).sort(), ['engine', 'generated_at', 'manifest_path', 'output_directory', 'report_path', 'result_status'])
   const manifest = JSON.parse(await readFile(join(exportDirectory, 'manifest.json'), 'utf8'))
+  assert.equal(manifest.generated_at, exported.output['generated_at'])
+  assert.ok(is_generated_at(manifest.generated_at))
   assert.equal(manifest.status, 'complete')
   assert.equal(manifest.source_mode, 'fixture')
   const acceptance = JSON.parse(await readFile(join(exportDirectory, 'acceptance.json'), 'utf8'))
@@ -78,10 +95,25 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   assert.equal(await check_export(exportDirectory, 'fixture'), true)
   assert.equal(await check_export(exportDirectory, 'live'), false)
   const workspace = JSON.parse(await readFile(join(exportDirectory, 'workspace.json'), 'utf8'))
+  for (const file of ['manifest.json', 'workspace.json', 'acceptance.json', 'fields.json', 'students/S1%3AM1.json', 'classes/C1%3AM1.json', 'class-plans/C1%3AM1.json', 'node-pairings/student%3AS1%3AM1%3AM2.json']) {
+    const path = join(exportDirectory, file), original = await readFile(path, 'utf8')
+    for (const bad of [undefined, 'not-a-date', '2026-02-30T00:00:00.000Z', '2000-01-01T00:00:00.000Z']) {
+      const value = JSON.parse(original)
+      const result = file.startsWith('students/') ? value.statistics : value
+      if (bad === undefined) delete result.generated_at
+      else result.generated_at = bad
+      await writeFile(path, JSON.stringify(value))
+      assert.equal(await check_export(exportDirectory, 'fixture'), false, `${file} must reject ${bad}`)
+    }
+    await writeFile(path, original)
+    assert.equal(await check_export(exportDirectory, 'fixture'), true)
+  }
   const csvPath = join(exportDirectory, 'csv', 'students', 'S1%3AM1', 'statistics.csv')
   const csv = await readFile(csvPath, 'utf8')
   assert.deepEqual(csv_payload(csv), workspace.payload.cases['S1:M1'].statistics.payload)
   assert.ok(manifest.csv_files.includes('csv/students/S1%3AM1/statistics.csv'))
+  await writeFile(csvPath, csv.replaceAll(workspace.generated_at, '2000-01-01T00:00:00.000Z'))
+  assert.equal(await check_export(exportDirectory, 'fixture'), false)
   await writeFile(csvPath, csv.replace('"study-csv-v1"', '"wrong-version"'))
   assert.equal(await check_export(exportDirectory, 'fixture'), false)
   await unlink(csvPath)
@@ -91,7 +123,7 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   const selectedCsv = join(directory, 'selected.csv')
   const csvRequest = ['run', '--data', directory, '--operation', 'get_student_stats', '--request', '{"student_id":"S1","node_id":"M1"}', '--out', selectedCsv, '--format', 'csv', '--summary-only', '--fixture']
   assert.equal(run(csvRequest).status, 0)
-  assert.equal(await readFile(selectedCsv, 'utf8'), csv)
+  assert_same_csv_batch(await readFile(selectedCsv, 'utf8'), csv)
   assert.equal(run(csvRequest).status, 1, 'CSV exports must refuse overwriting')
   assert.equal(run(['run', '--data', directory, '--operation', 'get_student_stats', '--format', 'xml', '--summary-only', '--out', selectedCsv]).status, 1)
   await writeFile(join(exportDirectory, 'index.html'), '<!doctype html><html>incomplete</html>')
@@ -104,7 +136,7 @@ test('compiled export and privacy-preserving requests create reviewable local ar
   const pairingRequest = ['run', '--data', directory, '--operation', 'inspect_node_pairing', '--request', '{"student_id":"S1","left_node_id":"M1","right_node_id":"M2"}', '--summary-only', '--fixture']
   const singlePairing = join(directory, 'pairing.csv')
   assert.equal(run([...pairingRequest, '--out', singlePairing, '--format', 'csv']).status, 0)
-  assert.equal(await readFile(singlePairing, 'utf8'), pairingCsv)
+  assert_same_csv_batch(await readFile(singlePairing, 'utf8'), pairingCsv)
   await unlink(pairingPath)
   assert.equal(await check_export(exportDirectory, 'fixture'), false)
   await writeFile(pairingPath, pairing)

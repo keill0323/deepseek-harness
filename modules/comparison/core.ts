@@ -228,7 +228,7 @@ const LIMITATIONS = [
 function result<T>(dataset: PreparedDataset, scope: Record<string, string | boolean>, payload: T,
   status: ResultEnvelope<T>['result_status'], evidence: string[] = [], limitations: string[] = []): ResultEnvelope<T> {
   return {
-    schema_version: dataset.schema_version, dataset_version: dataset.dataset_version,
+    schema_version: dataset.schema_version, generated_at: dataset.generated_at, dataset_version: dataset.dataset_version,
     policy_version: dataset.policy_version, producer_version: dataset.producer_version, source_mode: dataset.source_mode,
     scope, result_status: status, payload, evidence_ids: [...new Set(evidence)].sort(), limitations,
   }

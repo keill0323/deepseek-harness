@@ -12,6 +12,8 @@ export interface DatasetInput {
 
 /** Explicit versions and origin used by every result from a prepared dataset. */
 export interface PrepareOptions {
+  /** Batch start in canonical UTC; omit for a new run, supply only for deterministic replay. */
+  generated_at?: string
   source_mode?: 'live' | 'fixture'
   producer_version?: string
   /**
@@ -57,6 +59,8 @@ export interface EvidenceRecord {
 /** Immutable-by-convention snapshot; current records contain the highest revisions only. */
 export interface PreparedDataset {
   schema_version: 'team-v1'
+  /** Analysis batch start, shared by results and exports; not part of the dataset hash. */
+  generated_at: string
   dataset_version: string
   policy_version: 'team-policy-v1' | 'team-policy-v2'
   producer_version: string
@@ -87,6 +91,8 @@ export interface StudentScope {
 /** Common team result metadata, including partial evidence and limitations. */
 export interface ResultEnvelope<T> {
   schema_version: 'team-v1'
+  /** Analysis batch start, shared by results and exports; not part of the dataset hash. */
+  generated_at: string
   dataset_version: string
   policy_version: 'team-policy-v1' | 'team-policy-v2'
   producer_version: string

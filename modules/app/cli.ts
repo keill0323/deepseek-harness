@@ -56,6 +56,7 @@ async function writeNew(path: string, value: unknown): Promise<void> {
  * @returns Exit code; malformed or incomplete exports fail visibly.
  */
 export async function run_companion_cli(args: string[]): Promise<number> {
+  const generated_at = new Date().toISOString()
   const summaryOnly = args.includes('--summary-only')
   try {
     const { command, options, flags } = argumentsFor(args)
@@ -64,7 +65,7 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     if (command === 'export' && [...options.keys()].some(key => !['--data', '--out'].includes(key))) throw new Error('export只接受--data和--out')
     if (command === 'run' && summaryOnly && !options.has('--out')) throw new Error('run --summary-only 必须指定本地--out文件')
     const input = await load_dataset(required(options, '--data'))
-    const dataset = prepare_workspace_dataset(input, { source_mode: flags.has('--fixture') ? 'fixture' : 'live' })
+    const dataset = prepare_workspace_dataset(input, { generated_at, source_mode: flags.has('--fixture') ? 'fixture' : 'live' })
     if (command === 'run') {
       const format = options.get('--format') ?? 'json'
       if (format !== 'json' && format !== 'csv') throw new Error('--format 必须为json或csv')
@@ -81,7 +82,7 @@ export async function run_companion_cli(args: string[]): Promise<number> {
         await writeFile(resolve(output), serialized, { encoding: 'utf8', flag: 'wx' })
       }
       const response = summaryOnly
-        ? { result_status: result.result_status, operation, result_path: resolve(required(options, '--out')), engine: 'local_rules' }
+        ? { generated_at, result_status: result.result_status, operation, result_path: resolve(required(options, '--out')), engine: 'local_rules' }
         : result
       process.stdout.write(summaryOnly ? `${JSON.stringify(response, null, 2)}\n` : serialized)
       return result.result_status === 'error' ? 1 : 0
@@ -97,12 +98,13 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     await writeNew(join(directory, 'workspace.json'), workspace)
     await writeNew(join(directory, 'acceptance.json'), verification)
     await writeNew(join(directory, 'fields.json'), {
-      schema_version: 'team-v1', versions: ['dataset_version', 'policy_version', 'producer_version'],
+      schema_version: 'team-v1', generated_at: workspace.generated_at,
+      generated_at_description: '本批次分析开始时间，UTC ISO 8601毫秒格式；所有模块和导出共用，不参与数据版本哈希。下载不改变时间，重新分析生成新时间。', versions: ['dataset_version', 'policy_version', 'producer_version'],
       csv: {
         format: CSV_FORMAT, encoding: 'UTF-8 BOM，逗号分隔，CRLF行结束，所有单元格双引号转义',
         rows: '每个对象或数组一行；path是payload内的JSON Pointer，空字符串为根；row_type标识object/array/value，length保留数组长度。value/列为该对象的直接字段；下级对象、数组和数组元素按path关联。',
         types: 'types_json保留字段类型：未知值为null，真实零分为number 0，空文本为string。空单元格表示该行不含此列，不代表零分。',
-        metadata: '每行带版本、状态和scope_json；根行保留总evidence_ids_json和limitations_json；数值由同一JSON结果投影，不重新计算。',
+        metadata: '每行带generated_at、版本、状态和scope_json；根行保留总evidence_ids_json和limitations_json；数值由同一JSON结果投影，不重新计算。',
         escaping: '可能被表格软件解释为公式的文本加单引号，escaped_columns_json列出这些列；还原时只删除所列单元格的一个前导单引号。数值不加前缀。导入表格软件时将编号列指定为文本。',
       },
       result_status: { ok: '已完成且有可用证据', insufficient_data: '信息不足，分数未知为null', needs_review: '包含需人工核对的记录或结论', error: '请求无效或操作失败' },
@@ -144,19 +146,19 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     }
     await writeFile(join(directory, 'README.txt'), '双击index.html查看本地交互报告。workspace.json及students、classes、class-plans、node-pairings为可机读成果，csv为同源表格投影，fields.json解释字段和CSV还原规则。页面支持当前结果、学生练习与班级建议的CSV下载。acceptance.json仅记录自动核验，真人复验仍待完成。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
     await writeNew(join(directory, 'manifest.json'), {
-      status: 'complete', generated_at: new Date().toISOString(), schema_version: workspace.schema_version, dataset_version: workspace.dataset_version,
+      status: 'complete', generated_at: workspace.generated_at, schema_version: workspace.schema_version, dataset_version: workspace.dataset_version,
       policy_version: workspace.policy_version, producer_version: workspace.producer_version, source_mode: workspace.source_mode,
       export_format_version: 'study-export-v2', csv_format: CSV_FORMAT, csv_files: csvFiles.map(([name]) => `csv/${name}`),
       entry: 'index.html', report_sha256: createHash('sha256').update(html).digest('hex'), verification: 'acceptance.json', machine_readable: 'workspace.json', human_review: 'pending',
     })
     process.stdout.write(`${JSON.stringify({
-      result_status: workspace.result_status, engine: 'local_rules', output_directory: directory,
+      generated_at: workspace.generated_at, result_status: workspace.result_status, engine: 'local_rules', output_directory: directory,
       report_path: join(directory, 'index.html'), manifest_path: join(directory, 'manifest.json'),
       ...(summaryOnly ? {} : { automated_verification: verification.status, student_case_count: Object.keys(workspace.payload.cases).length, class_report_count: Object.keys(workspace.payload.class_reports).length }),
     }, null, 2)}\n`)
     return 0
   } catch (error) {
-    process.stdout.write(`${JSON.stringify({ result_status: 'error', engine: 'local_rules', error: summaryOnly ? '本地操作失败；请在本地检查输入、参数和输出目录。' : error instanceof Error ? error.message : '本地操作失败' }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ generated_at, result_status: 'error', engine: 'local_rules', error: summaryOnly ? '本地操作失败；请在本地检查输入、参数和输出目录。' : error instanceof Error ? error.message : '本地操作失败' }, null, 2)}\n`)
     return 1
   }
 }

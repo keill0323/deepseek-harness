@@ -102,7 +102,7 @@ test('a new identifier set and reordered inputs still produce consistent complet
   const renamed = JSON.parse(JSON.stringify(input).replace(/S[123]|C[12]|M[12]|T[12]|I[123]|A[123]|R[12]|E[12]/gu, id => replacements.get(id)!))
   const first = build_workspace(prepare_workspace_dataset(renamed, { source_mode: 'fixture' }))
   for (const rows of Object.values(renamed)) if (Array.isArray(rows)) rows.reverse()
-  const second = build_workspace(prepare_workspace_dataset(renamed, { source_mode: 'fixture' }))
+  const second = build_workspace(prepare_workspace_dataset(renamed, { source_mode: 'fixture', generated_at: first.generated_at }))
   assert.equal(verify_workspace(first).status, 'passed')
   assert.equal(verify_workspace(second).status, 'passed')
   assert.deepEqual(first.payload.class_plans, second.payload.class_plans)

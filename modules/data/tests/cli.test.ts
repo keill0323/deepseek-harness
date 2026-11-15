@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import { is_generated_at } from '../time.ts'
 import { make_input, make_record } from './helpers.ts'
 
 const sourceCli = fileURLToPath(new URL('../cli.ts', import.meta.url))
@@ -17,6 +18,7 @@ function execute(script: string, args: string[]): { status: number | null; outpu
   assert.equal(result.stderr, '')
   const parsed: unknown = JSON.parse(result.stdout)
   assert.ok(typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed))
+  assert.ok(is_generated_at(Reflect.get(parsed, 'generated_at')))
   return { status: result.status, output: parsed as Record<string, unknown> }
 }
 

@@ -5,7 +5,31 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
-import { verify_harness_events } from '../harness.ts'
+import { verify_harness_events, verify_harness_result } from '../harness.ts'
+import { execute_operation } from '../core.ts'
+import { prepare_workspace_dataset } from '../pipeline.ts'
+import { make_demo_input } from '../demo.ts'
+
+test('Harness result replay accepts the observed batch time but rejects stale times and changed business fields', () => {
+  const generated_at = '2026-11-14T10:00:00.500Z'
+  const dataset = prepare_workspace_dataset(make_demo_input(), { source_mode: 'fixture', generated_at })
+  const start = Date.parse('2026-11-14T10:00:00.000Z'), end = start + 1000
+  const requests = {
+    get_student_stats: { student_id: 'DEMO-A', node_id: 'CHECK-2' },
+    compare_students: { left_student_id: 'DEMO-A', right_student_id: 'DEMO-B', node_id: 'CHECK-2' },
+    diagnose_student: { student_id: 'DEMO-A', node_id: 'CHECK-2' },
+    build_learning_plan: { student_id: 'DEMO-A', node_id: 'CHECK-2' },
+  }
+  for (const [operation, request] of Object.entries(requests)) {
+    const actual = JSON.parse(JSON.stringify(execute_operation(dataset, operation, request)))
+    assert.doesNotThrow(() => verify_harness_result(actual, operation, request, start, end))
+    for (const bad of [undefined, 'invalid', '2026-02-30T10:00:00.000Z', new Date(start - 1).toISOString(), new Date(end + 1).toISOString()]) {
+      assert.throws(() => verify_harness_result({ ...actual, generated_at: bad }, operation, request, start, end), /OPERATION_TIMESTAMP_INVALID/)
+    }
+    assert.throws(() => verify_harness_result({ ...actual, payload: {} }, operation, request, start, end), /OPERATION_RESULT_MISMATCH/)
+    assert.throws(() => verify_harness_result({ ...actual, evidence_ids: [] }, operation, request, start, end), /OPERATION_RESULT_MISMATCH/)
+  }
+})
 
 // Hand-authored validator inputs, not evidence of a real model or Harness run.
 function fixture() {
