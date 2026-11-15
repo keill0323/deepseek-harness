@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { verify_workspace } from './verify.ts'
 import type { WorkspacePayload } from './core.ts'
 import type { ResultEnvelope } from '../data/types.ts'
+import { CSV_FORMAT, csv_exports, result_to_csv } from './csv.ts'
 
 /**
  * Verify completion and the content of every exported student and class file.
@@ -31,6 +32,11 @@ export async function check_export(directory: string, sourceMode: 'live' | 'fixt
     for (const [folder, values] of Object.entries({ students: workspace.payload.cases, classes: workspace.payload.class_reports, 'class-plans': workspace.payload.class_plans })) {
       for (const [key, value] of Object.entries(values)) if (!isDeepStrictEqual(value, await json(`${folder}/${encodeURIComponent(key)}.json`))) return false
     }
+    const csvFiles = csv_exports(workspace)
+    if (!('export_format_version' in manifest) || manifest.export_format_version !== 'study-export-v2'
+      || !('csv_format' in manifest) || manifest.csv_format !== CSV_FORMAT
+      || !('csv_files' in manifest) || !isDeepStrictEqual(manifest.csv_files, csvFiles.map(([name]) => `csv/${name}`))) return false
+    for (const [name, entry] of csvFiles) if (await readFile(join(directory, 'csv', name), 'utf8') !== result_to_csv(entry)) return false
     await json('fields.json')
     const html = await readFile(join(directory, 'index.html'), 'utf8')
     return 'report_sha256' in manifest && manifest.report_sha256 === createHash('sha256').update(html).digest('hex') && html.startsWith('<!doctype html>') && html.includes('</html>')

@@ -7,21 +7,22 @@ import { build_workspace, execute_operation } from './core.ts'
 import { prepare_workspace_dataset } from './pipeline.ts'
 import { render_report } from './report.ts'
 import { verify_workspace } from './verify.ts'
+import { CSV_FORMAT, csv_exports, result_to_csv } from './csv.ts'
 
 const HELP = `智慧学伴完整本地工具
   npm run study:build
   node modules/app/cli.ts export --data <CSV目录> --out <新目录> [--summary-only]
   node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request <JSON>
-  node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request-file <JSON文件> [--out <新JSON文件>] [--summary-only]
+  node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request-file <JSON文件> [--out <新文件>] [--format json|csv] [--summary-only]
 操作：get_student_stats、get_evidence、compare_students、compare_with_peers、analyze_class、compare_classes、get_curriculum、diagnose_student、build_learning_plan、build_class_plan、get_hint、workspace。
-export 导出独立交互HTML、JSON成果、字段说明和自动核验。--fixture 标识测试数据。
+export 导出独立交互HTML、同源JSON/CSV成果、字段说明和自动核验。--fixture 标识测试数据。
 --summary-only 仅回传结果状态与本地文件路径，供Harness调用；run时必须同时指定--out。
 `
 
 function argumentsFor(args: string[]): { command: string; options: Map<string, string>; flags: Set<string> } {
   const command = args[0] ?? 'help'
   const options = new Map<string, string>(), flags = new Set<string>()
-  const names = new Set(['--data', '--out', '--operation', '--request', '--request-file'])
+  const names = new Set(['--data', '--out', '--operation', '--request', '--request-file', '--format'])
   for (let i = 1; i < args.length; i += 1) {
     const name = args[i]!
     if (name === '--fixture' || name === '--summary-only') {
@@ -64,6 +65,8 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     const input = await load_dataset(required(options, '--data'))
     const dataset = prepare_workspace_dataset(input, { source_mode: flags.has('--fixture') ? 'fixture' : 'live' })
     if (command === 'run') {
+      const format = options.get('--format') ?? 'json'
+      if (format !== 'json' && format !== 'csv') throw new Error('--format 必须为json或csv')
       const operation = required(options, '--operation')
       if (options.has('--request') && options.has('--request-file')) throw new Error('--request与--request-file只能选一个')
       const raw = options.has('--request-file') ? await readFile(required(options, '--request-file'), 'utf8') : options.get('--request') ?? '{}'
@@ -71,11 +74,15 @@ export async function run_companion_cli(args: string[]): Promise<number> {
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error('请求必须为JSON对象')
       const result = execute_operation(dataset, operation, parsed as Record<string, unknown>)
       const output = options.get('--out')
-      if (output) await writeNew(resolve(output), result)
+      const serialized = format === 'csv' ? result_to_csv(result) : `${JSON.stringify(result, null, 2)}\n`
+      if (output) {
+        await mkdir(dirname(resolve(output)), { recursive: true })
+        await writeFile(resolve(output), serialized, { encoding: 'utf8', flag: 'wx' })
+      }
       const response = summaryOnly
         ? { result_status: result.result_status, operation, result_path: resolve(required(options, '--out')), engine: 'local_rules' }
         : result
-      process.stdout.write(`${JSON.stringify(response, null, 2)}\n`)
+      process.stdout.write(summaryOnly ? `${JSON.stringify(response, null, 2)}\n` : serialized)
       return result.result_status === 'error' ? 1 : 0
     }
     const directory = resolve(required(options, '--out'))
@@ -90,6 +97,13 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     await writeNew(join(directory, 'acceptance.json'), verification)
     await writeNew(join(directory, 'fields.json'), {
       schema_version: 'team-v1', versions: ['dataset_version', 'policy_version', 'producer_version'],
+      csv: {
+        format: CSV_FORMAT, encoding: 'UTF-8 BOM，逗号分隔，CRLF行结束，所有单元格双引号转义',
+        rows: '每个对象或数组一行；path是payload内的JSON Pointer，空字符串为根；row_type标识object/array/value，length保留数组长度。value/列为该对象的直接字段；下级对象、数组和数组元素按path关联。',
+        types: 'types_json保留字段类型：未知值为null，真实零分为number 0，空文本为string。空单元格表示该行不含此列，不代表零分。',
+        metadata: '每行带版本、状态和scope_json；根行保留总evidence_ids_json和limitations_json；数值由同一JSON结果投影，不重新计算。',
+        escaping: '可能被表格软件解释为公式的文本加单引号，escaped_columns_json列出这些列；还原时只删除所列单元格的一个前导单引号。数值不加前缀。导入表格软件时将编号列指定为文本。',
+      },
       result_status: { ok: '已完成且有可用证据', insufficient_data: '信息不足，分数未知为null', needs_review: '包含需人工核对的记录或结论', error: '请求无效或操作失败' },
       score_rate: '0到1的得分比例，仅使用有效评分记录', delta_percentage_points: '左侧减右侧，单位百分点',
       evidence_ids: '可在本地证据页核对的作答记录编号', source_row_number: 'CSV表头为第1条的逻辑行位置',
@@ -117,10 +131,17 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     for (const [key, entry] of Object.entries(workspace.payload.class_plans)) {
       await writeNew(join(directory, 'class-plans', `${encodeURIComponent(key)}.json`), entry)
     }
-    await writeFile(join(directory, 'README.txt'), '双击index.html查看本地交互报告。workspace.json及students、classes、class-plans为可机读成果，fields.json解释字段。acceptance.json仅记录自动核验，真人复验仍待完成。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
+    const csvFiles = csv_exports(workspace)
+    for (const [name, entry] of csvFiles) {
+      const path = join(directory, 'csv', name)
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(path, result_to_csv(entry), { encoding: 'utf8', flag: 'wx' })
+    }
+    await writeFile(join(directory, 'README.txt'), '双击index.html查看本地交互报告。workspace.json及students、classes、class-plans为可机读成果，csv为同源表格投影，fields.json解释字段和CSV还原规则。页面支持当前结果、学生练习与班级建议的CSV下载。acceptance.json仅记录自动核验，真人复验仍待完成。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
     await writeNew(join(directory, 'manifest.json'), {
       status: 'complete', generated_at: new Date().toISOString(), schema_version: workspace.schema_version, dataset_version: workspace.dataset_version,
       policy_version: workspace.policy_version, producer_version: workspace.producer_version, source_mode: workspace.source_mode,
+      export_format_version: 'study-export-v2', csv_format: CSV_FORMAT, csv_files: csvFiles.map(([name]) => `csv/${name}`),
       entry: 'index.html', report_sha256: createHash('sha256').update(html).digest('hex'), verification: 'acceptance.json', machine_readable: 'workspace.json', human_review: 'pending',
     })
     process.stdout.write(`${JSON.stringify({

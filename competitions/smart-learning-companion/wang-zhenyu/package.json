@@ -11,6 +11,6 @@
     "build:real": "node scripts/build-deliverable.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24.9"
   }
 }
