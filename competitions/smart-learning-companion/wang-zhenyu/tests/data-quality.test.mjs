@@ -42,3 +42,20 @@ test('节点范围冲突保留原节点，不按日期或题号自动迁移', ()
   assert.equal(audit.reviewRequired, true);
   assert.deepEqual(audit.issueCodes, ['node_scope_conflict']);
 });
+
+
+test('未知评分点不能作为自动纠分依据', () => {
+  const question = {
+    ...q017,
+    '评分点': 'Q017P1 答案正确 1分',
+  };
+  const audit = auditRecord(rawRecord({
+    '记录编号': 'SYN-004',
+    '得分': '3',
+    '评分点得分': 'UNKNOWN_POINT=1',
+  }), question, n01);
+  assert.equal(audit.reviewRequired, true);
+  assert.ok(audit.issueCodes.includes('invalid_point_scores'));
+  assert.equal(audit.scoreSource, 'review_required');
+  assert.equal(audit.resolvedScore, null);
+});

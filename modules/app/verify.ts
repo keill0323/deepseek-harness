@@ -4,6 +4,7 @@ import { build_node_pairings } from './core.ts'
 import type { ResultEnvelope } from '../data/types.ts'
 import type { WorkspacePayload } from './core.ts'
 import { scope_key } from '../shared/result.ts'
+import { hint_leaks_answer } from '../guidance/core.ts'
 
 /** Machine-checkable consistency findings for one exported report. */
 export interface VerificationResult {
@@ -105,6 +106,7 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
       if (hint.payload.item_id !== itemId || hint.payload.student_id !== expected.student_id || hint.payload.node_id !== expected.node_id) errors.push(`${key}: 提示内容对象不同`)
       ownEvidence(hint.evidence_ids, expected.student_id, expected.node_id, key)
       if (hint.payload.mode !== 'student' || hint.payload.teacher_solution !== undefined) errors.push(`${key}: 学生提示包含教师答案字段`)
+      if (hint_leaks_answer(hint.payload.hint, materials.get(itemId)?.['参考答案'] ?? '')) errors.push(`${key}: 学生提示泄露题目结论或答案`)
     }
     for (const activity of entry.plan.payload.activities) for (const itemId of activity.item_ids) {
       const hints = entry.hints[itemId]

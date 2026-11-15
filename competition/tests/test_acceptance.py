@@ -73,9 +73,10 @@ def test_acceptance_4_numbers_by_code():
     proc = subprocess.run(
         [sys.executable, "-m", "study_companion", "stats",
          "--student", "E01", "--node", "EN01", "--json"],
-        capture_output=True, text=True, cwd=COMPETITION_DIR,
+        capture_output=True, text=True, encoding="utf-8", cwd=COMPETITION_DIR,
         env={"PYTHONPATH": str(COMPETITION_DIR / "src"),
-             "STUDY_COMPANION_DATA_DIR": str(FIXTURES), "PATH": "/usr/bin:/bin"},
+             "STUDY_COMPANION_DATA_DIR": str(FIXTURES), "PATH": "/usr/bin:/bin",
+             "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
         check=True,
     )
     import json

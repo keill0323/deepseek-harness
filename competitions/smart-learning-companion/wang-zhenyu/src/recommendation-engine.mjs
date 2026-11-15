@@ -4,6 +4,7 @@
  * 输入必须来自已核验的学生证据、题库和诊断结果。本模块不修改原始记录。
  */
 import { INDICATORS, TOPICS, getTopic } from './knowledge-base.mjs';
+import { parsePointScoreEntries } from './data-quality.mjs';
 
 export const PLAN_SCHEMA_VERSION = '1.1.0';
 
@@ -78,6 +79,7 @@ function normalizeQuestions(questions) {
     answer: q.answer ?? q['参考答案'] ?? '',
     analysis: q.analysis ?? q['参考解析'] ?? '',
     max_score: numberOrNull(q.max_score ?? q['满分']),
+    scoring_rubric: q.scoring_rubric ?? q['评分点'] ?? null,
     source: q.source ?? q['来源或资料文件'] ?? ''
   }]));
 }
@@ -142,6 +144,32 @@ function validateEvidenceContext(studentId, evidence, questions, nodes, targetNo
     }
     if (item.max_score !== null && question.max_score !== null && item.max_score !== question.max_score) {
       errors.push(label + ': 证据满分与题库不一致');
+    }
+    if (item.status === STATUS_GRADED) {
+      if (item.score === null || item.max_score === null || item.max_score <= 0) {
+        errors.push(label + ': 已评分证据缺少有效得分或满分');
+      } else if (item.score < 0 || item.score > item.max_score) {
+        errors.push(label + ': 证据得分超出有效范围');
+      }
+      const pointEntries = parsePointScoreEntries(item.point_scores);
+      if (pointEntries.length > 0) {
+        const pointSum = pointEntries.reduce((sum, entry) => sum + entry.score, 0);
+        if (item.score !== null && pointSum !== item.score) errors.push(label + ': 评分点合计与得分不一致');
+        if (new Set(pointEntries.map((entry) => entry.point_id)).size !== pointEntries.length) {
+          errors.push(label + ': 评分点编号重复');
+        }
+        if (question.scoring_rubric !== null) {
+          const rubric = new Map();
+          for (const line of String(question.scoring_rubric ?? '').split(/\r?\n/).filter((entry) => entry.trim())) {
+            const match = /^(\S+)\s+.+?\s+(\d+(?:\.\d+)?)\s*分\s*$/.exec(line.trim());
+            if (match?.[1] && match[2] && !rubric.has(match[1])) rubric.set(match[1], Number(match[2]));
+          }
+          if (rubric.size === 0 || pointEntries.some((entry) => !rubric.has(entry.point_id)
+            || entry.score < 0 || entry.score > rubric.get(entry.point_id))) {
+            errors.push(label + ': 评分点编号或单项得分不可信');
+          }
+        }
+      }
     }
     if (nodes.size > 0) {
       const node = nodes.get(item.node_id);
@@ -657,6 +685,16 @@ export function validatePlan(plan, context = {}) {
   if (!plan || typeof plan !== 'object') return ['计划不是对象'];
   if (!plan.plan_id) errors.push('缺少 plan_id');
   if (!plan.student?.id) errors.push('缺少 student.id');
+  const completeContext = context
+    && context.student?.id
+    && Array.isArray(context.evidence)
+    && context.questions
+    && context.nodes
+    && context.target_node_id;
+  if (!completeContext) {
+    errors.push('缺少完整验证上下文：必须提供 student、evidence、questions、nodes 和 target_node_id');
+    return errors;
+  }
 
   const questions = normalizeQuestions(context.questions ?? {});
   for (const teacherItem of plan.teacher_explanation ?? []) {
@@ -687,9 +725,15 @@ export function validatePlan(plan, context = {}) {
     errors.push('计划目标节点与验证上下文不一致');
   }
 
-  const sourceEvidence = Array.isArray(context.evidence)
-    ? context.evidence.map(normalizeEvidenceItem)
-    : null;
+  const sourceEvidence = context.evidence.map(normalizeEvidenceItem);
+  const sourceContextErrors = validateEvidenceContext(
+    context.student.id,
+    sourceEvidence,
+    questions,
+    normalizeNodes(context.nodes ?? {}),
+    context.target_node_id
+  );
+  for (const error of sourceContextErrors) errors.push('验证上下文: ' + error);
   const evidenceRefs = [];
   for (const item of plan.evidence_used ?? []) {
     const label = item.source_ref || item.record_id || item.item_id || '(unknown)';
@@ -733,6 +777,19 @@ export function validatePlan(plan, context = {}) {
   if (Array.isArray(declaredEvidenceIds)) {
     const actual = unique(evidenceRefs);
     if (actual.join('|') !== declaredEvidenceIds.join('|')) errors.push('quality_checks.evidence_ids 与实际证据不一致');
+  }
+  if (plan.primary_focus?.indicator_id) {
+    const expectedEvidence = sourceEvidence.filter((item) => item.status === STATUS_GRADED
+      && item.indicator_id === plan.primary_focus.indicator_id);
+    const expectedRefs = expectedEvidence.map((item) => item.record_id).sort();
+    if (expectedRefs.join('|') !== unique(evidenceRefs).sort().join('|')) {
+      errors.push('计划未使用当前学生和目标节点内全部可用的首要指标证据');
+    }
+    const earned = expectedEvidence.reduce((sum, item) => sum + (item.score ?? 0), 0);
+    const possible = expectedEvidence.reduce((sum, item) => sum + (item.max_score ?? 0), 0);
+    const expectedRate = possible ? Math.round((earned / possible) * 1000) / 10 : null;
+    if (plan.primary_focus.evidence_count !== expectedEvidence.length) errors.push('首要指标证据数量与上下文不一致');
+    if (plan.primary_focus.score_rate !== expectedRate) errors.push('首要指标得分率与上下文不一致');
   }
 
   if (!Array.isArray(plan.steps) || plan.steps.length < 3) errors.push('步骤不足');

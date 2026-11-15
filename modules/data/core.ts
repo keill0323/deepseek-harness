@@ -173,6 +173,8 @@ function evaluateRecord(
   const issues = record.quality_issues
   const item = items.get(record.item_id)
   const node = nodes.get(record.node_id)
+  const itemMaximum = item ? numeric(item['满分']) : null
+  const effectiveMaxForValidation = itemMaximum ?? record.max_score
   if (!students.has(record.student_id)) issues.push({ code: 'unknown_student', message: '学生编号不在输入学生表中。' })
   if (!item || item['材料类型'] !== '题目') issues.push({ code: 'unknown_item', message: '材料编号不对应输入中的题目。' })
   if (!node) issues.push({ code: 'unknown_node', message: '节点编号不在输入测验节点表中。' })
@@ -192,7 +194,7 @@ function evaluateRecord(
   if (record.max_score === null || record.max_score <= 0) {
     issues.push({ code: 'invalid_maximum', message: '记录满分缺失、不是有限十进制数或非正数。' })
   }
-  if (item && (numeric(item['满分']) === null || record.max_score !== numeric(item['满分']))) {
+  if (item && (itemMaximum === null || record.max_score !== itemMaximum)) {
     issues.push({ code: 'maximum_mismatch', message: '记录满分与题目满分不一致。' })
   }
   if (!['已评分', '待评分', '未作答'].includes(record.grading_status)) {
@@ -201,8 +203,8 @@ function evaluateRecord(
   let pointsTotal: number | null = null
   if (record.grading_status === '已评分') {
     if (record.score === null) issues.push({ code: 'missing_score', message: '已评分记录的得分缺失或不是有限十进制数。' })
-    if (record.score !== null && (record.score < 0 || (record.max_score !== null && record.score > record.max_score))) {
-      issues.push({ code: 'score_out_of_range', message: '记录得分小于零或超过满分。' })
+    if (record.score !== null && (record.score < 0 || (effectiveMaxForValidation !== null && record.score > effectiveMaxForValidation))) {
+      issues.push({ code: 'score_out_of_range', message: '记录得分小于零或超过有效满分。' })
     }
     if (item) {
       pointsTotal = checkPoints(record, item, issues)
@@ -224,7 +226,6 @@ function evaluateRecord(
       record.corrected = { ...(record.corrected ?? {}), topic_id: item['主题编号'] ?? record.topic_id }
     }
     // b) 记录满分以题库为准修正
-    const itemMaximum = item ? numeric(item['满分']) : null
     if (itemMaximum !== null && issues.some(issue => issue.code === 'maximum_mismatch')) {
       record.corrected = { ...(record.corrected ?? {}), max_score: itemMaximum }
     }

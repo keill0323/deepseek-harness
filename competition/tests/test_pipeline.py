@@ -152,8 +152,8 @@ def test_determinism_shuffle_inputs_byte_identical(tmp_path):
                 f"seed={seed} 打乱行序后产物不一致: {rel}"
 
     # 数据指纹真实生效：打乱后的数据文件哈希必须不同
-    meta_orig = json.load(open(tmp_path / "out_orig" / "_meta.json"))
-    meta_shuf = json.load(open(tmp_path / "out_s1" / "_meta.json"))
+    meta_orig = json.load(open(tmp_path / "out_orig" / "_meta.json", encoding="utf-8"))
+    meta_shuf = json.load(open(tmp_path / "out_s1" / "_meta.json", encoding="utf-8"))
     h1 = meta_orig["数据文件"]["作答记录.csv"]["sha256"]
     h2 = meta_shuf["数据文件"]["作答记录.csv"]["sha256"]
     assert h1 != h2 and len(h1) == 64
@@ -162,7 +162,7 @@ def test_determinism_shuffle_inputs_byte_identical(tmp_path):
 def test_meta_sidecar_fields(tmp_path):
     from study_companion.pipeline import run_pipeline
     paths = run_pipeline(FIXTURES, tmp_path / "out_meta")
-    meta = json.load(open(paths["生成元数据"]))
+    meta = json.load(open(paths["生成元数据"], encoding="utf-8"))
     assert meta["处置策略"] == "repair_consistent_points"
     assert meta["原始行数"] == 15 and meta["归并后事件数"] == 13
     assert set(meta["数据文件"]) >= {"作答记录.csv", "题目与材料.csv"}

@@ -4,7 +4,9 @@ import { get_student_stats, prepare_dataset } from '../../data/core.ts'
 import { load_dataset } from '../../data/io.ts'
 import { make_input, make_record } from '../../data/tests/helpers.ts'
 import { diagnose_student } from '../../diagnosis/core.ts'
-import { build_learning_plan, get_hint } from '../core.ts'
+import { build_learning_plan, get_hint, hint_leaks_answer } from '../core.ts'
+import { build_class_plan } from '../class.ts'
+import { guidance_for } from '../knowledge.ts'
 
 test('a plan connects observed partial scores to available test-specific activities', () => {
   const ds = prepare_dataset(make_input(), { source_mode: 'fixture' })
@@ -305,4 +307,42 @@ test('official three-case plans remain differentiated and reference actual allow
     assert.ok(!hint.payload.hint.includes('x>-4'))
     assert.ok(!('teacher_solution' in hint.payload))
   }
+})
+
+
+test('prototype-named indicators use the generic fallback in plan, hint, and class plan', () => {
+  for (const indicatorId of ['constructor', 'toString']) {
+    const input = make_input()
+    assert.ok(input.requirements[0])
+    assert.ok(input.items[0])
+    input.requirements[0].指标编号 = indicatorId
+    input.items[0].指标编号 = indicatorId
+    const ds = prepare_dataset(input, { source_mode: 'fixture' })
+    const plan = build_learning_plan(ds, { student_id: 'S1', node_id: 'M1' })
+    assert.ok(plan.payload.activities.length > 0)
+    const hint = get_hint(ds, { student_id: 'S1', node_id: 'M1', item_id: 'A1', level: 1 })
+    assert.equal(hint.result_status, 'ok')
+    assert.ok(hint.payload.hint.length > 0)
+    const classPlan = build_class_plan(ds, { class_id: 'C1', node_id: 'M1' })
+    assert.ok(classPlan.payload.recommendations.length > 0)
+    assert.equal(guidance_for(indicatorId).hints.length, 3)
+  }
+})
+
+
+test('conclusion leakage is detected from the actual answer text', () => {
+  const answer = '能；化简结果为3的倍数'
+  assert.equal(hint_leaks_answer('这个式子化简后结果是3的倍数。', answer), true)
+  assert.equal(hint_leaks_answer('先合并同类项，再引用化简结果说明判断依据。', answer), false)
+
+  const input = make_input()
+  assert.ok(input.requirements[0])
+  assert.ok(input.items[0])
+  input.requirements[0].指标编号 = 'T01I3'
+  input.items[0].指标编号 = 'T01I3'
+  input.items[0].参考答案 = answer
+  const ds = prepare_dataset(input, { source_mode: 'fixture' })
+  const hint = get_hint(ds, { student_id: 'S1', node_id: 'M1', item_id: 'A1', level: 3 })
+  assert.equal(hint.result_status, 'ok')
+  assert.equal(hint_leaks_answer(hint.payload.hint, answer), false)
 })

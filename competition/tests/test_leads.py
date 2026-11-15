@@ -1,5 +1,6 @@
 """步骤诊断线索模块测试：真阳性识别 + 各类假阳性必须排除 + 口径边界."""
 
+import csv
 import shutil
 
 import pytest
@@ -22,9 +23,14 @@ def lead_dataset(tmp_path):
          newline="").write(students + "\nE06,EC02,7\n")
     # 解答题 QX09（满分3，EN02 可用）
     questions = open(FIXTURES / "题目与材料.csv", encoding="utf-8-sig").read().rstrip("\n")
-    open(tmp_path / "题目与材料.csv", "w", encoding="utf-8-sig", newline="").write(
-        questions + "\nQX09,T02,题目,解答题,示例解答题四。,,m=5,第一步；第二步；第三步,3,"
-        "QX09P1 步骤一 1分\nQX09P2 步骤二 1分\nQX09P3 步骤三 1分,T02I1,合成\n")
+    open(tmp_path / "题目与材料.csv", "w", encoding="utf-8-sig", newline="").write(questions + "\n")
+    with open(tmp_path / "题目与材料.csv", "a", encoding="utf-8", newline="") as f:
+        csv.writer(f).writerow([
+            "QX09", "T02", "题目", "解答题", "示例解答题四。", "", "m=5",
+            "第一步；第二步；第三步", "3",
+            "QX09P1 步骤一 1分\nQX09P2 步骤二 1分\nQX09P3 步骤三 1分",
+            "T02I1", "合成",
+        ])
     nodes = open(FIXTURES / "测验节点.csv", encoding="utf-8-sig").read().rstrip("\n").splitlines()
     nodes[2] = nodes[2] + "、QX09"
     open(tmp_path / "测验节点.csv", "w", encoding="utf-8-sig",

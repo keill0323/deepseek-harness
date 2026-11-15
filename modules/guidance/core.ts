@@ -25,6 +25,30 @@ function normalize(text: string): string {
   return text.normalize('NFKC').replace(/\s/gu, '').replace(/[−﹣]/gu, '-')
 }
 
+/** Return whether a student hint copies an answer fragment or states the question's conclusion. */
+export function hint_leaks_answer(hint: string, answer: string): boolean {
+  const normalizedHint = normalize(hint).toLowerCase()
+  const normalizedAnswer = normalize(answer).toLowerCase()
+  if (!normalizedHint || !normalizedAnswer) return false
+  if (/^(?:答案|参考答案)[:：]/u.test(hint.trim())) return true
+  if (/^\p{Script=Han}$/u.test(normalizedAnswer) && normalizedHint.includes(normalizedAnswer)) return true
+  const fragments = [normalizedAnswer]
+  for (const segment of normalizedAnswer.split(/[；;。，,\n]+/u)) {
+    fragments.push(segment.replace(/^(?:参考)?答案[:：]?/u, '').replace(/^(?:答|结果|结论)[:：]?/u, ''))
+  }
+  for (const match of normalizedAnswer.matchAll(/[-]?\d+(?:\.\d+)?/gu)) {
+    if (match[0].length >= 2) fragments.push(match[0])
+  }
+  if (fragments.some(fragment => fragment.length >= 2 && normalizedHint.includes(fragment))) return true
+  if (/^[a-d]$/u.test(normalizedAnswer) && /(?:答案(?:是|为)?|应选|选)[a-d]/iu.test(normalizedHint)) return true
+  return [
+    /(?:所以|因此|可知|可见).*(?:正确|错误|恒等|等于|为|不变|无关|成立|不成立)/u,
+    /(?:恒等于|恒为|对所有.+都不变|与.+取值无关|说法(?:正确|错误))/u,
+    /(?:结果|结论)(?:是|为)(?:[-]?\d|[a-z]|.{0,10}(?:不变|无关|正确|错误))/u,
+    /(?:应选|选)[a-d]/iu,
+  ].some(pattern => pattern.test(normalizedHint))
+}
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
@@ -64,7 +88,10 @@ function methodHint(family: ReturnType<typeof skillFamily>, level: 1 | 2 | 3): s
 }
 
 function focusedHint(item: CsvRow, requirement: CsvRow | undefined, level: 1 | 2 | 3): string {
-  const indicatorGuidance = item['指标编号'] ? INDICATOR_GUIDANCE[item['指标编号']] : undefined
+  const indicatorId = item['指标编号']
+  const indicatorGuidance = indicatorId && Object.hasOwn(INDICATOR_GUIDANCE, indicatorId)
+    ? INDICATOR_GUIDANCE[indicatorId]
+    : undefined
   if (indicatorGuidance) return indicatorGuidance.hints[level - 1]!
   const text = `${item['题干或内容'] ?? ''} ${requirement?.['观察指标'] ?? ''}`
   const hints = /方程组|消元|二元/u.test(text) ? [
@@ -309,10 +336,10 @@ export function get_hint(dataset: PreparedDataset, request: HintRequest): Result
   if (mode === 'teacher') {
     payload.teacher_solution = { reference_answer: item['参考答案'] ?? '', reference_analysis: item['参考解析'] ?? '', scoring_rubric: item['评分点'] ?? '' }
   } else {
-    const answer = normalize(item['参考答案'] ?? '')
-    if (answer !== '' && normalize(payload.hint).includes(answer)) {
+    const answer = item['参考答案'] ?? ''
+    if (hint_leaks_answer(payload.hint, answer)) {
       payload.hint = '请标记你准备使用的条件，写出每一步理由，并请教师核对。'
-      if (normalize(payload.hint).includes(answer)) {
+      if (hint_leaks_answer(payload.hint, answer)) {
         payload.hint = ''
         return result(dataset, scope, payload, 'needs_review', evidence.map(record => record.record_id), ['通用提示与参考答案存在文本重合，已隐藏提示，需教师补充。'])
       }

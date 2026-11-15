@@ -102,7 +102,7 @@ for vr in clean.valid_records:                       # 当前有效记录
 ## 测试与验收自检
 
 ```sh
-python3 -m pytest tests/            # 487 项：固定样例 86 + 随机性质测试 401
+python3 -m pytest tests/            # 490 项：固定样例 89 + 随机性质测试 401
 ```
 
 - `tests/test_acceptance.py` 逐条对应验收书检查项（版本归并、异常处理、

@@ -27,6 +27,8 @@ ISSUE_LABELS = {
     "semantic_review": "答案与参考答案一致但记0分（语义复核）",
     "full_score_mismatch_bank": "记录满分与题库不一致",
     "score_repaired_from_points": "得分按评分点合计修正（纠正）",
+    "invalid_point_scores": "评分点编号、取值或范围不可信",
+    "score_negative": "得分为负数",
 }
 
 

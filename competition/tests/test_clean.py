@@ -1,8 +1,10 @@
 """版本归并与异常处置测试（验收书：版本归并 / 异常处理 / 状态区别）."""
 
 from study_companion.clean import (
+    ISSUE_INVALID_POINT_SCORES,
     ISSUE_NODE_OUT_OF_SCOPE,
     ISSUE_SCORE_EXCEEDS_FULL,
+    ISSUE_SCORE_NEGATIVE,
     ISSUE_SEMANTIC_REVIEW,
     ISSUE_THEME_MISMATCH,
     ISSUE_TOTAL_POINTS_MISMATCH,
@@ -182,3 +184,66 @@ def test_bank_full_score_mismatch_no_mutation(tmp_path):
     # 统计分母用有效满分：E05@EN02 仅 XR0200(2/3)
     s = student_node_stats(ds, build_valid_records(ds), "E05", "EN02")
     assert (s["总体"]["得分"], s["总体"]["满分"]) == (2, 3)
+
+
+def _load_with_appended_records(tmp_path, rows):
+    import shutil
+    from conftest import FIXTURES
+    from study_companion.load import load_all
+    from study_companion.clean import build_valid_records
+
+    for name in ["课程要求.csv", "题目与材料.csv", "模拟学生.csv",
+                 "测验节点.csv", "字段说明.csv"]:
+        shutil.copy(FIXTURES / name, tmp_path / name)
+    lines = open(FIXTURES / "作答记录.csv", encoding="utf-8-sig").read().splitlines()
+    lines.extend(rows)
+    open(tmp_path / "作答记录.csv", "w", encoding="utf-8-sig",
+         newline="").write("\n".join(lines) + "\n")
+    clean = build_valid_records(load_all(tmp_path))
+    return {vr.record.record_id: vr for vr in clean.valid_records}
+
+
+def test_out_of_scope_blocks_consistent_point_repair(tmp_path):
+    by_id = _load_with_appended_records(tmp_path, [
+        "XR0400,E05,QX07,T03,EN01,E05-EN01-QX07,1,"
+        "2026-01-20T12:00:00+08:00,已评分,10,1,x>1,,QX07P1=1"
+    ])
+    vr = by_id["XR0400"]
+    assert ISSUE_NODE_OUT_OF_SCOPE in vr.issues
+    assert vr.stats_flag == FLAG_EXCLUDED
+    assert vr.effective_score is None
+    assert vr.record.node_id == "EN01"
+    assert "score_repaired_from_points" not in vr.issues
+
+
+def test_repair_requires_authoritative_maximum(tmp_path):
+    by_id = _load_with_appended_records(tmp_path, [
+        "XR0401,E05,QX08,T03,EN02,E05-EN02-QX08,1,"
+        "2026-06-17T12:00:00+08:00,已评分,10,1,x<2,,"
+        "QX08P1=1；QX08P2=0；QX08P3=0"
+    ])
+    vr = by_id["XR0401"]
+    assert ISSUE_SCORE_EXCEEDS_FULL in vr.issues
+    assert vr.effective_full_score == 3
+    assert vr.stats_flag == FLAG_EXCLUDED
+    assert vr.effective_score is None
+    assert "score_repaired_from_points" not in vr.issues
+
+
+def test_invalid_and_negative_point_scores_are_excluded(tmp_path):
+    by_id = _load_with_appended_records(tmp_path, [
+        "XR0402,E05,QX03,T01,EN01,E05-EN01-QX03,1,"
+        "2026-01-20T12:05:00+08:00,已评分,1,3,k=2,,QX99P1=1",
+        "XR0403,E05,QX08,T03,EN02,E05-EN02-QX08,1,"
+        "2026-06-17T12:05:00+08:00,已评分,1,3,x<2,,"
+        "QX08P1=3；QX08P2=-2；QX08P3=0",
+        "XR0404,E05,QX03,T01,EN02,E05-EN02-QX03,1,"
+        "2026-06-17T12:10:00+08:00,已评分,-1,3,k=2,,"
+        "QX03P1=-1；QX03P2=0；QX03P3=0",
+    ])
+    for record_id in ["XR0402", "XR0403", "XR0404"]:
+        vr = by_id[record_id]
+        assert ISSUE_INVALID_POINT_SCORES in vr.issues
+        assert vr.stats_flag == FLAG_EXCLUDED
+        assert vr.effective_score is None
+    assert ISSUE_SCORE_NEGATIVE in by_id["XR0404"].issues

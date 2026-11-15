@@ -56,16 +56,20 @@ test('待评分不会被当成零分证据', () => {
 });
 
 test('SAMPLE-Q01计划定位负系数反向，且学生提示不泄题', () => {
+  const source = record();
   const plan = buildLearningPlan({
     student: { id: 'S01', class_id: 'SC01' },
-    evidence: [record()],
+    evidence: [source],
     questions,
+    nodes: nodeScopes,
+    target_node_id: 'N02',
     focus_indicator: 'T03I1',
     preferred_items: ['SAMPLE-Q01', 'SAMPLE-Q02', 'SAMPLE-Q03']
   }, '2026-11-14T12:00:00+08:00');
   assert.equal(plan.primary_focus.indicator_id, 'T03I1');
   assert.equal(plan.steps[1].item_refs[0], 'SAMPLE-Q01');
-  assert.equal(validatePlan(plan).length, 0);
+  assert.equal(validatePlan(plan, planContext(plan, [source])).length, 0);
+  assert.match(validatePlan(plan).join(' '), /缺少完整验证上下文/);
   const studentHints = plan.steps.flatMap((step) => step.hints).map((hint) => hint.text).join(' ');
   assert.equal(studentHints.includes('y>1'), false);
   assert.equal(studentHints.includes('y<1'), false);

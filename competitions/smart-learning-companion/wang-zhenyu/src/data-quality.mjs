@@ -11,9 +11,27 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+export function parsePointScoreEntries(value) {
+  const entries = [];
+  for (const match of String(value ?? '').matchAll(/([^\s=；;]+)\s*=\s*(-?\d+(?:\.\d+)?)/g)) {
+    const score = Number(match[2]);
+    if (match[1] && Number.isFinite(score)) entries.push({ point_id: match[1], score });
+  }
+  return entries;
+}
+
 export function parsePointScoreValues(value) {
-  const matches = [...String(value ?? '').matchAll(/=\s*(-?\d+(?:\.\d+)?)/g)];
-  return matches.map((match) => Number(match[1])).filter(Number.isFinite);
+  return parsePointScoreEntries(value).map((entry) => entry.score);
+}
+
+function parseRubricMaximums(value) {
+  const maximums = new Map();
+  for (const line of String(value ?? '').split(/\r?\n/).filter((entry) => entry.trim())) {
+    const match = /^(\S+)\s+.+?\s+(\d+(?:\.\d+)?)\s*分\s*$/.exec(line.trim());
+    if (!match?.[1] || !match[2] || maximums.has(match[1])) return null;
+    maximums.set(match[1], Number(match[2]));
+  }
+  return maximums.size ? maximums : new Map();
 }
 
 export function normalizeComparableAnswer(value) {
@@ -44,7 +62,8 @@ function issueReason(codes) {
     score_point_conflict: '总分与评分点合计不一致',
     point_sum_over_max: '评分点合计超过题目满分',
     graded_score_missing: '已评分记录缺少有效得分',
-    answer_key_zero_conflict: '最终作答与参考答案一致但评分为零，需人工复核'
+    answer_key_zero_conflict: '最终作答与参考答案一致但评分为零，需人工复核',
+    invalid_point_scores: '评分点编号、取值或范围不可信'
   };
   return codes.map((code) => labels[code] ?? code).join('；');
 }
@@ -69,8 +88,20 @@ export function auditRecord(record, question, node) {
   const topicId = record['主题编号'] ?? record.topic_id;
   const studentAnswer = record['学生最终作答'] ?? record.answer ?? '';
   const referenceAnswer = question?.['参考答案'] ?? question?.answer ?? '';
-  const pointValues = parsePointScoreValues(record['评分点得分'] ?? record.point_scores);
+  const pointEntries = parsePointScoreEntries(record['评分点得分'] ?? record.point_scores);
+  const pointValues = pointEntries.map((entry) => entry.score);
   const pointSum = pointValues.length ? pointValues.reduce((sum, value) => sum + value, 0) : null;
+  const rubricText = question?.['评分点'] ?? question?.scoring_rubric ?? null;
+  const rubricMaximums = rubricText === null ? null : parseRubricMaximums(rubricText);
+  let invalidPointScores = false;
+  if (status === '已评分' && rubricText !== null) {
+    const pointIds = pointEntries.map((entry) => entry.point_id);
+    invalidPointScores = !rubricMaximums
+      || new Set(pointIds).size !== pointIds.length
+      || new Set(pointIds).size !== rubricMaximums.size
+      || pointIds.some((pointId) => !rubricMaximums.has(pointId))
+      || pointEntries.some((entry) => entry.score < 0 || entry.score > rubricMaximums.get(entry.point_id));
+  }
 
   if (!question) codes.push('missing_question');
   if (!node) codes.push('unknown_node');
@@ -87,6 +118,7 @@ export function auditRecord(record, question, node) {
 
   if (status === '已评分') {
     if (originalScore === null) codes.push('graded_score_missing');
+    if (invalidPointScores) codes.push('invalid_point_scores');
     if (maxScore !== null && originalScore !== null && (originalScore < 0 || originalScore > maxScore)) {
       codes.push('score_out_of_range');
     }
@@ -108,7 +140,7 @@ export function auditRecord(record, question, node) {
   let resolvedScore = originalScore;
   let scoreSource = 'original';
   if (status === '已评分') {
-    const pointSumIsValid = pointSum !== null && pointSum >= 0 && maxScore !== null && pointSum <= maxScore;
+    const pointSumIsValid = !invalidPointScores && pointSum !== null && pointSum >= 0 && maxScore !== null && pointSum <= maxScore;
     const originalIsValid = originalScore !== null && maxScore !== null && originalScore >= 0 && originalScore <= maxScore;
     if (!originalIsValid && pointSumIsValid) {
       resolvedScore = pointSum;
@@ -134,6 +166,7 @@ export function auditRecord(record, question, node) {
     questionMaxScore,
     pointScoreValues: pointValues,
     pointScoreSum: pointSum,
+    invalidPointScores,
     resolvedScore,
     scoreSource,
     canonicalTopicId,
