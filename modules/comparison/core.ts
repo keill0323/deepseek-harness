@@ -30,6 +30,132 @@ export interface ClassScope {
   node_id: string
 }
 
+/** Two distinct nodes for one student or one class; no cross-node score comparison. */
+export type NodePairingScope = { left_node_id: string; right_node_id: string }
+  & ({ student_id: string } | { class_id: string })
+
+/** Coverage and quality at one node, with no missing-value score imputation. */
+export interface NodeObservation {
+  node_id: string
+  allowed: boolean
+  taught: boolean
+  record_count: number
+  valid_record_count: number
+  valid_student_ids: string[]
+  evidence_ids: string[]
+  quality_record_ids: string[]
+  reason_codes: string[]
+}
+
+/** Same-item, same-student observation pairs; pairing does not establish learning progress. */
+export interface NodePairingPayload {
+  kind: 'student' | 'class'
+  subject_id: string
+  left_node_id: string
+  right_node_id: string
+  candidate_item_ids: string[]
+  shared_allowed_item_ids: string[]
+  paired_item_ids: string[]
+  items: Array<{
+    item_id: string
+    topic_id: string
+    indicator_id: string
+    left: NodeObservation
+    right: NodeObservation
+    paired_student_ids: string[]
+    pairable: boolean
+    reason_codes: string[]
+  }>
+  comparable: false
+  delta_rate: null
+  reason_codes: string[]
+}
+
+/**
+ * Identify same-item observations available at two nodes without inferring progress.
+ * @param dataset - Prepared current records and the input node teaching scopes.
+ * @param scope - One student or class and two distinct nodes, in display order.
+ * @returns Pairable items, side-specific gaps and evidence; no cross-node score or ranking.
+ */
+export function inspect_node_pairing(dataset: PreparedDataset, scope: NodePairingScope): ResultEnvelope<NodePairingPayload> {
+  const kind = 'student_id' in scope ? 'student' : 'class'
+  const subject = 'student_id' in scope ? scope.student_id : scope.class_id
+  const members = kind === 'student'
+    ? dataset.input.students.filter(row => row['学生编号'] === subject).map(row => row['学生编号']!)
+    : classMembers(dataset, subject)
+  const leftNode = dataset.input.nodes.find(row => row['节点编号'] === scope.left_node_id)
+  const rightNode = dataset.input.nodes.find(row => row['节点编号'] === scope.right_node_id)
+  const payload: NodePairingPayload = {
+    kind, subject_id: subject, left_node_id: scope.left_node_id, right_node_id: scope.right_node_id,
+    candidate_item_ids: [], shared_allowed_item_ids: [], paired_item_ids: [], items: [],
+    comparable: false, delta_rate: null, reason_codes: [],
+  }
+  if (!members.length) payload.reason_codes.push(kind === 'student' ? 'unknown_student' : 'unknown_class')
+  if (!leftNode || !rightNode) payload.reason_codes.push('unknown_node')
+  if (scope.left_node_id === scope.right_node_id) payload.reason_codes.push('same_node')
+  if (payload.reason_codes.length || !leftNode || !rightNode) {
+    return result(dataset, { ...scope }, payload, 'error', [], ['请选择一个有效学生或班级，以及两个不同的测验节点。'])
+  }
+  const leftAllowed = new Set(splitIds(leftNode['可用题目编号']))
+  const rightAllowed = new Set(splitIds(rightNode['可用题目编号']))
+  const itemMap = new Map(dataset.input.items.filter(row => row['材料类型'] === '题目').map(row => [row['材料编号']!, row]))
+  payload.candidate_item_ids = [...new Set([...leftAllowed, ...rightAllowed])].sort()
+  if (payload.candidate_item_ids.some(id => !itemMap.has(id))) {
+    payload.reason_codes.push('unknown_item_in_node')
+    return result(dataset, { ...scope }, payload, 'error', [], ['节点题目索引包含不存在的题目，请核对输入后重跑。'])
+  }
+  payload.shared_allowed_item_ids = payload.candidate_item_ids.filter(id => leftAllowed.has(id) && rightAllowed.has(id))
+  const memberSet = new Set(members)
+  const selected = dataset.current.filter(row => memberSet.has(row.student_id)
+    && (row.node_id === scope.left_node_id || row.node_id === scope.right_node_id))
+  function observation(nodeId: string, itemId: string, allowed: boolean, taught: boolean): NodeObservation {
+    const rows = selected.filter(row => row.node_id === nodeId && row.item_id === itemId)
+    const valid = rows.filter(row => allowed && taught && row.include_in_statistics)
+    const reasons: string[] = []
+    if (!allowed) reasons.push('item_not_allowed_in_node')
+    if (!taught) reasons.push('topic_not_taught')
+    if (!rows.length) reasons.push('no_records')
+    if (rows.some(row => row.grading_status === '待评分')) reasons.push('pending_grading')
+    if (rows.some(row => row.grading_status === '未作答')) reasons.push('unanswered')
+    if (rows.some(row => row.action === 'review' && !row.include_in_statistics)) reasons.push('quality_excluded')
+    if (rows.some(row => row.action === 'review' && row.include_in_statistics)) reasons.push('scoring_review_retained')
+    if (!valid.length) reasons.push('no_valid_records')
+    return {
+      node_id: nodeId, allowed, taught, record_count: rows.length, valid_record_count: valid.length,
+      valid_student_ids: [...new Set(valid.map(row => row.student_id))].sort(),
+      evidence_ids: valid.map(row => row.record_id).sort(),
+      quality_record_ids: rows.filter(row => row.quality_issues.length).map(row => row.record_id).sort(), reason_codes: reasons,
+    }
+  }
+  const leftTaught = new Set(splitIds(leftNode['已教及测量主题']))
+  const rightTaught = new Set(splitIds(rightNode['已教及测量主题']))
+  for (const id of payload.candidate_item_ids) {
+    const item = itemMap.get(id)!
+    const topic = item['主题编号']!
+    const left = observation(scope.left_node_id, id, leftAllowed.has(id), leftTaught.has(topic))
+    const right = observation(scope.right_node_id, id, rightAllowed.has(id), rightTaught.has(topic))
+    const rightStudents = new Set(right.valid_student_ids)
+    const paired = left.valid_student_ids.filter(student => rightStudents.has(student))
+    const reasons: string[] = []
+    if (!left.allowed || !right.allowed || !left.taught || !right.taught) reasons.push('node_scope_mismatch')
+    if (!left.valid_record_count || !right.valid_record_count) reasons.push('missing_valid_observations')
+    else if (!paired.length) reasons.push('no_common_valid_students')
+    payload.items.push({ item_id: id, topic_id: topic, indicator_id: item['指标编号']!, left, right,
+      paired_student_ids: paired, pairable: paired.length > 0, reason_codes: reasons })
+  }
+  payload.paired_item_ids = payload.items.filter(item => item.pairable).map(item => item.item_id)
+  payload.reason_codes.push('cross_node_progress_not_established')
+  if (!payload.shared_allowed_item_ids.length) payload.reason_codes.push('no_shared_allowed_items')
+  if (!payload.paired_item_ids.length) payload.reason_codes.push('no_paired_observations')
+  const evidence = payload.items.flatMap(item => [item.left, item.right].flatMap(side => [...side.evidence_ids, ...side.quality_record_ids]))
+  const reviewed = selected.some(row => row.action === 'review' && payload.candidate_item_ids.includes(row.item_id))
+  return result(dataset, { ...scope }, payload, reviewed ? 'needs_review' : payload.paired_item_ids.length ? 'ok' : 'insufficient_data', evidence, [
+    '可配对仅表示同一学生在两个节点对同一道题均有有效评分记录；班级按逐题共同学生配对，不把不同学生混作纵向样本。',
+    '两个节点的教学范围、作答条件与重复练习影响未被控制，因此不计算跨节点总分差，不将可配对观察解释为学习进步或教学效果。',
+    '缺记录、待评分、未作答、未教范围与质量隔离分别列出；真实零分保留，语义复核依计分标记处理并附复核依据。',
+  ])
+}
+
 /** Per-item means and sample sizes retained for recomputing the common-item result. */
 export interface ComparedItem {
   item_id: string

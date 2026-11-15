@@ -17,6 +17,7 @@ const vState = {
   qualityScope: 'all', qualitySearch: '', hintStates: new Map(),
 }
 let vCurrentExport = WORKSPACE
+const vExportButtons = []
 let vMain
 let vPageTitle
 let vNodeDescription
@@ -138,6 +139,7 @@ function vTable(columns, rows, emptyMessage = '当前范围没有记录。') {
 }
 
 function vDownload(value, filename) {
+  if (!value) return
   const csv = filename.endsWith('.csv')
   const url = URL.createObjectURL(new Blob([csv ? result_to_csv(value) : `${JSON.stringify(value, null, 2)}\n`], { type: csv ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }))
   const anchor = vEl('a')
@@ -362,9 +364,54 @@ function vPlan() {
   vMain.append(vLimitations(item.plan))
 }
 
+function vNodePairing(controls) {
+  const otherNodes = vNodes.filter(node => node.node_id !== vState.node)
+  controls.append(vSelect('配对对象', [{ value: 'student', label: '当前学生' }, { value: 'class', label: '指定班级' }], vState.pairingType ?? 'student', value => { vState.pairingType = value; vRender() }).wrapper)
+  if (vState.pairingType === 'class') controls.append(vSelect('配对班级', vWorkspace.classes.map(id => ({ value: id, label: id })), vState.selectedClass, value => { vState.selectedClass = value; vRender() }).wrapper)
+  if (!otherNodes.length) {
+    vCurrentExport = null
+    vMain.append(vPanel('跨节点观察配对', '至少需要两个测验节点；当前输入只有一个节点，暂无法配对。', controls))
+    return
+  }
+  if (!otherNodes.some(node => node.node_id === vState.pairingRightNode)) vState.pairingRightNode = otherNodes[0].node_id
+  controls.append(vSelect('另一测验节点', otherNodes.map(node => ({ value: node.node_id, label: `${node.node_id} · ${node.date}` })), vState.pairingRightNode, value => { vState.pairingRightNode = value; vRender() }).wrapper)
+  const subject = vState.pairingType === 'class' ? { class_id: vState.selectedClass } : { student_id: vState.student }
+  const result = inspect_node_pairing(vSnapshot, { ...subject, left_node_id: vState.node, right_node_id: vState.pairingRightNode })
+  vCurrentExport = result
+  const payload = result.payload
+  const reasons = {
+    item_not_allowed_in_node: '该节点不含此题', topic_not_taught: '该节点尚未教学此主题', no_records: '无作答记录',
+    pending_grading: '存在待评分作答', unanswered: '存在未作答记录', quality_excluded: '质量问题待复核，未计入有效观察',
+    scoring_review_retained: '语义复核保留原分，仍需核对', no_valid_records: '无有效评分记录',
+    node_scope_mismatch: '两个节点的题目或教学范围不一致', missing_valid_observations: '至少一侧缺少有效观察',
+    no_common_valid_students: '两侧有效作答来自不同学生，不能配对',
+  }
+  const sideCell = side => vEl('div', '', `${side.valid_student_ids.length} 人 · ${side.valid_record_count} 条有效 / ${side.record_count} 条记录`,
+    side.reason_codes.map(code => vEl('p', 'muted', reasons[code] ?? code)),
+    vEvidenceLinks([...new Set([...side.evidence_ids, ...side.quality_record_ids])]))
+  vMain.append(vPanel('跨节点观察配对', `${payload.subject_id} · ${payload.left_node_id} 与 ${payload.right_node_id}。选择同一对象，逐题核对两个节点的观察范围。`, controls),
+    vEl('p', 'notice', '可配对表示存在同题、同一学生的有效作答。教学范围和作答条件不同，不能直接据此判断学习进步；本页不计算跨节点分数差。'),
+    vMetrics([
+      { label: '两节点共同题目', value: payload.shared_allowed_item_ids.length, detail: `题目并集 ${payload.candidate_item_ids.length} 道` },
+      { label: '有配对观察的题目', value: payload.paired_item_ids.length, detail: '逐题要求同一学生两侧均有有效记录' },
+      { label: '尚不能配对', value: payload.items.length - payload.paired_item_ids.length, detail: '具体原因与记录状态见下表' },
+    ]),
+    vPanel('可配对题目与不可比原因', '有效人数不等于配对人数；班级只配对逐题共同学生。', vBadge(result.result_status),
+      vTable([
+        { label: '题目', render: row => vEl('div', '', vEl('strong', '', row.item_id), vEl('p', 'muted', `${row.topic_id} · ${row.indicator_id}`)) },
+        { label: payload.left_node_id, render: row => sideCell(row.left) },
+        { label: payload.right_node_id, render: row => sideCell(row.right) },
+        { label: '配对观察', render: row => row.pairable
+          ? vEl('div', '', `可配对 · ${row.paired_student_ids.length} 人`, vEl('p', 'muted', row.paired_student_ids.join('、')))
+          : vEl('div', '', '暂不能配对', row.reason_codes.map(code => vEl('p', 'muted', reasons[code] ?? code))) },
+      ], payload.items, '两个节点均未提供可用题目，请核对输入题目范围。')),
+    vLimitations(result))
+}
+
 function vComparison() {
   const controls = vEl('div', 'comparison-controls')
-  controls.append(vSelect('比较方式', [{ value: 'peers', label: '个人与同伴' }, { value: 'students', label: '两名学生' }, { value: 'classes', label: '两个班级' }], vState.comparisonMode, value => { vState.comparisonMode = value; vRender() }).wrapper)
+  controls.append(vSelect('比较方式', [{ value: 'peers', label: '个人与同伴' }, { value: 'students', label: '两名学生' }, { value: 'classes', label: '两个班级' }, { value: 'nodes', label: '跨节点观察配对' }], vState.comparisonMode, value => { vState.comparisonMode = value; vRender() }).wrapper)
+  if (vState.comparisonMode === 'nodes') { vNodePairing(controls); return }
   let result
   if (vState.comparisonMode === 'peers') {
     result = compare_with_peers(vSnapshot, { student_id: vState.student, node_id: vState.node })
@@ -533,6 +580,7 @@ function vRender() {
   const render = { overview: vOverview, diagnosis: vDiagnosis, plan: vPlan, comparison: vComparison, classes: vClasses, curriculum: vCurriculum, quality: vQuality }[vState.view]
   if (!vStudents.length || !vNodes.length) vMain.append(vEmpty('当前快照没有学生或测验节点，请重新导入有效数据。'))
   else render()
+  for (const button of vExportButtons) button.disabled = !vCurrentExport
   vMain.append(vNotes())
 }
 
@@ -558,14 +606,15 @@ function vStart() {
   vNodeSelect.setAttribute('aria-label', '测验节点')
   vPageTitle = vEl('h1', '', '总览')
   vNodeDescription = vEl('p', 'node-description')
+  for (const format of ['csv', 'json']) vExportButtons.push(vButton(`导出当前 ${format.toUpperCase()}`, () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.${format}`), format === 'json' ? 'button button-primary' : 'button'))
   const toolbar = vEl('header', 'topbar', vEl('div', 'title-block', vEl('p', 'eyebrow', '教师工作台 · 本地报告'), vPageTitle),
     vEl('div', 'toolbar-controls', vStudentLookup(), studentField.wrapper, nodeField.wrapper,
-      vButton('打印当前页', () => window.print()), vButton('导出当前 CSV', () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.csv`)), vButton('导出当前 JSON', () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.json`), 'button button-primary')))
+      vButton('打印当前页', () => window.print()), ...vExportButtons))
   vMain = vEl('main', 'main-content')
   const fixture = WORKSPACE.source_mode === 'fixture'
   const source = vEl('div', `data-source-banner ${fixture ? 'source-fixture' : 'source-live'}`,
     vEl('strong', '', fixture ? '合成演示数据' : '赛事模拟数据'),
-    vEl('span', '', fixture ? '仅用于开发演示，不能代替正式数据验收。' : '本地分析结果；需复核的记录已隔离，不能据此证明真实教学成效。'))
+    vEl('span', '', fixture ? '仅用于开发演示，不能代替正式数据验收。' : '本地分析结果；复核记录保留处理说明，不能据此证明真实教学成效。'))
   source.setAttribute('aria-label', '数据来源')
   app.replaceChildren(vEl('div', 'app-shell', sidebar, vEl('div', 'workspace', toolbar, source, vEl('div', 'context-strip', vNodeDescription, vEl('span', 'source-label', '本地教师视图')), vMain)))
   document.addEventListener('keydown', event => {

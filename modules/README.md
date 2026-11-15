@@ -25,7 +25,7 @@ npm run study:demo -- --out tmp/study-data/demo-01
 npm run study:export -- --data tmp/study-data/input --out tmp/study-data/reports/run-01 --summary-only
 ```
 
-导出包含本地交互页面 `index.html`、全量结果 `workspace.json`、每名学生每个测验的 `students/*.json`、各班各节点的 `classes/*.json`、班级教学建议 `class-plans/*.json`、同源 `csv/`、字段说明 `fields.json`、自动核验 `acceptance.json` 和完整性标记 `manifest.json`。CSV 包含总览、课程、质量记录、逐学生逐节点的统计/诊断/计划/同伴比较/学生提示，以及班级报告和教学建议；所有内容直接投影同一结果，不重新计算。`manifest.json` 最后写入；没有该文件表示导出未完成。`node modules/app/check-export.ts <导出目录> live` 核对版本、范围、证据、子报告、全部 CSV 与 JSON 的逐字段内容及 HTML 的 SHA-256；合成报告将最后的参数改为 `fixture`。缺失、篡改或不一致均返回非零退出码。当前导出格式为 `study-export-v2`，旧报告需在新目录重新导出后才能通过此完整性检查。自动核验不替代非作者队员真人复验。
+导出包含本地交互页面 `index.html`、全量结果 `workspace.json`、每名学生每个测验的 `students/*.json`、各班各节点的 `classes/*.json`、班级教学建议 `class-plans/*.json`、跨节点观察 `node-pairings/*.json`、同源 `csv/`、字段说明 `fields.json`、自动核验 `acceptance.json` 和完整性标记 `manifest.json`。CSV 包含总览、课程、质量记录、逐学生逐节点的统计/诊断/计划/同伴比较/学生提示，以及班级报告、教学建议与跨节点配对；所有内容直接投影同一结果，不重新计算。`manifest.json` 最后写入；没有该文件表示导出未完成。`node modules/app/check-export.ts <导出目录> live` 核对版本、范围、证据、子报告、全部 CSV 与 JSON 的逐字段内容及 HTML 的 SHA-256；合成报告将最后的参数改为 `fixture`。缺失、篡改或不一致均返回非零退出码。当前导出格式为 `study-export-v2`，旧报告需在新目录重新导出后才能通过此完整性检查。自动核验不替代非作者队员真人复验。
 
 CSV 使用 UTF-8 BOM、逗号和 CRLF；按 `path`（payload 内的 JSON Pointer）定位每个对象或数组，`value/` 列展示直接字段，`row_type` 和 `length` 保留容器类型与数组长度。`types_json` 区分未知 `null`、真实数值 `0` 和空字符串；空单元格只表示该行不含此列。版本、状态及请求范围随行保留，根行记录总证据与限制。可能被表格软件识别为公式的文本添加一个单引号，`escaped_columns_json` 明确列出还原时应去掉此前缀的列；真正的负数保持数值。用表格软件导入时将编号列指定为文本，避免前导零被自动转换。完整字段解释见导出的 `fields.json`。
 
@@ -36,7 +36,7 @@ CSV 使用 UTF-8 BOM、逗号和 CRLF；按 `path`（payload 内的 JSON Pointer
 | 模块 | 入口 | 主要结果 |
 |---|---|---|
 | [数据](data/README.md) | `prepare_dataset`、`get_student_stats`、`get_evidence` | 最新修订、统计、质量问题和原始证据 |
-| [比较](comparison/README.md) | `compare_students`、`compare_with_peers`、`analyze_class`、`compare_classes` | 同节点共同题集、同题权重、逐题与评分点分布 |
+| [比较](comparison/README.md) | `compare_students`、`compare_with_peers`、`analyze_class`、`compare_classes`、`inspect_node_pairing` | 同节点比较、班级分布与跨节点观察配对 |
 | [诊断](diagnosis/README.md) | `get_curriculum`、`diagnose_student` | 课程材料索引、具体步骤、事实与证据不足 |
 | [指导](guidance/README.md) | `build_learning_plan`、`build_class_plan`、`get_hint` | 个人与班级补弱、解释迁移、补充观察和三级提示 |
 

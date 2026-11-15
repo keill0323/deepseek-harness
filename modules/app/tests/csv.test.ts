@@ -49,7 +49,7 @@ test('every report CSV preserves the existing scoped JSON including point distri
   const workspace = build_workspace(prepare_workspace_dataset(make_input(), { source_mode: 'fixture' }))
   const before = JSON.stringify(workspace)
   const files = csv_exports(workspace)
-  assert.equal(files.length, 3 + 3 * 2 * 5 + 2 * 2 * 2)
+  assert.equal(files.length, 3 + 3 * 2 * 5 + 2 * 2 * 2 + (3 + 2))
   assert.equal(new Set(files.map(([name]) => name)).size, files.length)
   for (const [, entry] of files) assert.deepEqual(csv_payload(result_to_csv(entry)), JSON.parse(JSON.stringify(entry.payload)))
   assert.equal(JSON.stringify(workspace), before)
