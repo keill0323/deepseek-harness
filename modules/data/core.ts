@@ -1,5 +1,6 @@
 /** Current-record selection, explicit quality corrections, scoped statistics and evidence queries. */
 import { createHash } from 'node:crypto'
+import { is_generated_at } from './time.ts'
 import type {
   CsvRow, DatasetInput, EvidencePayload, EvidenceQuery, EvidenceRecord, PreparedDataset,
   PrepareOptions, QualityIssue, ResultEnvelope, ScoreSummary, StudentScope, StudentStats,
@@ -281,11 +282,13 @@ function recordOrder(a: EvidenceRecord, b: EvidenceRecord): number {
 /**
  * Select each event's highest revision and apply differentiated or conservative quality handling.
  * @param input - Literal source tables; exact repeated rows are imported once.
- * @param options - Source origin, implementation version and quality policy; differentiated by default.
+ * @param options - Source origin, implementation version, batch time and quality policy; differentiated by default.
  * @returns A snapshot retaining all distinct historical versions and the current view.
- * @throws If identifiers, revision order, or equally identified source rows are ambiguous.
+ * @throws If the batch time is invalid, or identifiers, revisions or equally identified rows are ambiguous.
  */
 export function prepare_dataset(input: DatasetInput, options: PrepareOptions = {}): PreparedDataset {
+  const generated_at = options.generated_at === undefined ? new Date().toISOString() : options.generated_at
+  if (!is_generated_at(generated_at)) throw new Error('generated_at必须为有效的UTC时间（YYYY-MM-DDTHH:mm:ss.sssZ）')
   const policy = options.policy ?? 'differentiated'
   const tables: DatasetInput = {
     students: uniqueRows(input.students), items: uniqueRows(input.items), nodes: uniqueRows(input.nodes),
@@ -325,7 +328,7 @@ export function prepare_dataset(input: DatasetInput, options: PrepareOptions = {
   }).sort(recordOrder)
   const datasetVersion = `sha256:${createHash('sha256').update(JSON.stringify(tables)).digest('hex')}`
   return {
-    schema_version: 'team-v1', dataset_version: datasetVersion,
+    schema_version: 'team-v1', generated_at, dataset_version: datasetVersion,
     policy_version: policy === 'differentiated' ? 'team-policy-v2' : 'team-policy-v1',
     producer_version: options.producer_version ?? 'study-data@0.1.0', source_mode: options.source_mode ?? 'live',
     input: tables, history, current,
@@ -345,7 +348,7 @@ function envelope<T>(
   status: ResultEnvelope<T>['result_status'], evidence: string[], limitations: string[],
 ): ResultEnvelope<T> {
   return {
-    schema_version: dataset.schema_version, dataset_version: dataset.dataset_version, policy_version: dataset.policy_version,
+    schema_version: dataset.schema_version, generated_at: dataset.generated_at, dataset_version: dataset.dataset_version, policy_version: dataset.policy_version,
     producer_version: dataset.producer_version, source_mode: dataset.source_mode, scope, result_status: status,
     payload, evidence_ids: [...new Set(evidence)].sort(), limitations,
   }

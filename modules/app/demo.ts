@@ -72,6 +72,7 @@ function encodeCsv(rows: CsvRow[]): string {
  * @returns Process status; the shared exporter prints only artifact paths and general status.
  */
 export async function run_demo_cli(args: string[]): Promise<number> {
+  const generated_at = new Date().toISOString()
   try {
     if (args.length !== 2 || args[0] !== '--out' || !args[1] || args[1].startsWith('--')) throw new Error('指定唯一的--out新目录。')
     const directory = resolve(args[1])
@@ -85,7 +86,7 @@ export async function run_demo_cli(args: string[]): Promise<number> {
     }
     return await run_companion_cli(['export', '--data', inputDirectory, '--out', join(directory, 'report'), '--fixture', '--summary-only'])
   } catch {
-    process.stdout.write(`${JSON.stringify({ result_status: 'error', engine: 'local_rules', error: '合成演示生成失败；请指定尚不存在且可写的--out目录。' }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ generated_at, result_status: 'error', engine: 'local_rules', error: '合成演示生成失败；请指定尚不存在且可写的--out目录。' }, null, 2)}\n`)
     return 1
   }
 }

@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { is_generated_at } from '../data/time.ts'
 import { build_node_pairings } from './core.ts'
 import type { ResultEnvelope } from '../data/types.ts'
 import type { WorkspacePayload } from './core.ts'
@@ -6,6 +7,7 @@ import { scope_key } from '../shared/result.ts'
 
 /** Machine-checkable consistency findings for one exported report. */
 export interface VerificationResult {
+  generated_at: string
   status: 'passed' | 'failed'
   checks: string[]
   errors: string[]
@@ -20,6 +22,8 @@ export interface VerificationResult {
 export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): VerificationResult {
   const errors: string[] = []
   const data = workspace.payload
+  if (!is_generated_at(workspace.generated_at)) errors.push('generated_at缺失或不是有效的UTC毫秒时间')
+  if (data.browser_snapshot.generated_at !== workspace.generated_at) errors.push('browser_snapshot: generated_at不同')
   const records = new Map(data.browser_snapshot.current.map(record => [record.record_id, record]))
   const materials = new Map(data.browser_snapshot.input.items.map(item => [item['材料编号'], item]))
   const nodes = new Map(data.browser_snapshot.input.nodes.map(node => [node['节点编号']!, new Set(node['可用题目编号']?.split(/[、,，;；\s]+/u) ?? [])]))
@@ -32,7 +36,7 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
   for (const group of classes) for (const node of nodes.keys()) if (!Object.hasOwn(data.class_reports, scope_key(group, node))) errors.push('班级节点报告缺失')
   for (const group of classes) for (const node of nodes.keys()) if (!Object.hasOwn(data.class_plans, scope_key(group, node))) errors.push('班级节点建议缺失')
   function check(result: ResultEnvelope<unknown>, label: string, expected: Record<string, string> = {}): void {
-    for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode'] as const) {
+    for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode', 'generated_at'] as const) {
       if (result[key] !== workspace[key]) errors.push(`${label}: ${key}不同`)
     }
     if (result.result_status === 'error') errors.push(`${label}: 操作返回error`)
@@ -107,8 +111,8 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
       if (!hints || hints.length !== 3 || hints.map(hint => hint.payload.level).sort().join(',') !== '1,2,3') errors.push(`${key}: 三级学生提示不完整`)
       const teacher = entry.teacher_hints[itemId]
       if (!teacher || teacher.payload.mode !== 'teacher' || !teacher.payload.teacher_solution) errors.push(`${key}: 教师核对内容缺失`)
-      else check(teacher, `${key}:teacher`, { ...expected, item_id: itemId, mode: 'teacher' })
     }
+    for (const [itemId, teacher] of Object.entries(entry.teacher_hints)) check(teacher, `${key}:teacher`, { ...expected, item_id: itemId, mode: 'teacher' })
   }
   for (const [key, report] of Object.entries(data.class_reports)) {
     if (key !== scope_key(report.payload.class_id, report.payload.node_id) || !classes.has(report.payload.class_id) || !nodes.has(report.payload.node_id)) errors.push(`${key}: 班级报告对象不同`)
@@ -141,8 +145,8 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
     }
   }
   return {
-    status: errors.length ? 'failed' : 'passed',
-    checks: ['跨节点配对与当前输入一致', '各模块版本一致', '对象与测验节点一致', '作答证据与材料编号存在', '活动依据排除复核记录', '学生提示无教师答案字段'],
+    generated_at: workspace.generated_at, status: errors.length ? 'failed' : 'passed',
+    checks: ['generated_at有效且同批次一致', '跨节点配对与当前输入一致', '各模块版本一致', '对象与测验节点一致', '作答证据与材料编号存在', '活动依据排除复核记录', '学生提示无教师答案字段'],
     errors: [...new Set(errors)], human_review: 'pending',
   }
 }

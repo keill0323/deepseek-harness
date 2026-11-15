@@ -229,7 +229,7 @@ function vOverview() {
       ['02', '理解学生', '区分已观察事实、有限推断、证据不足和评分待复核。', 'diagnosis'],
       ['03', '理解教学', '把建议落实为练习、提示、观察与调整条件。', 'plan'],
     ].map(([number, title, description, view]) => vEl('article', 'workflow-step', vEl('span', 'step-number', number), vEl('h3', '', title), vEl('p', 'muted', description), vButton('打开', () => vShow(view), 'text-button'))))))
-  vMain.append(vEl('p', 'page-note', '本报告全部由同一数据快照生成。模拟记录用于核验任务质量，不能据此证明真实教学成效。'))
+  vMain.append(vEl('p', 'page-note', `分析时间（UTC）：${WORKSPACE.generated_at}。本报告全部由同一数据快照生成。模拟记录用于核验任务质量，不能据此证明真实教学成效。`))
 }
 
 function vStatistics(stats) {
@@ -275,7 +275,7 @@ function vDiagnosis() {
 function vStudentPlan(item) {
   const plan = item.plan
   return {
-    schema_version: plan.schema_version, dataset_version: plan.dataset_version, policy_version: plan.policy_version,
+    schema_version: plan.schema_version, generated_at: plan.generated_at, dataset_version: plan.dataset_version, policy_version: plan.policy_version,
     producer_version: plan.producer_version, source_mode: plan.source_mode, scope: plan.scope,
     result_status: plan.result_status, payload: {
       student_id: plan.payload.student_id, node_id: plan.payload.node_id, plan_type: plan.payload.plan_type,
@@ -563,7 +563,7 @@ function vNotes() {
   textarea.value = vState.notes[key] ?? ''
   textarea.addEventListener('input', () => { vState.notes[key] = textarea.value })
   return vEl('section', 'teacher-notes', vEl('div', 'notes-heading', vEl('h2', '', '教师备注'),
-    vButton('导出备注', () => vDownload({ dataset_version: WORKSPACE.dataset_version, policy_version: WORKSPACE.policy_version,
+    vButton('导出备注', () => vDownload({ generated_at: WORKSPACE.generated_at, dataset_version: WORKSPACE.dataset_version, policy_version: WORKSPACE.policy_version,
       kind: 'teacher_notes', changes_facts: false, notes: vState.notes }, 'teacher-notes.json'))),
     vEl('p', 'muted', '仅保留在当前浏览器会话，关闭页面前请导出。备注与分析事实分开保存。'), textarea)
 }

@@ -27,7 +27,11 @@ npm run study:export -- --data tmp/study-data/input --out tmp/study-data/reports
 
 导出包含本地交互页面 `index.html`、全量结果 `workspace.json`、每名学生每个测验的 `students/*.json`、各班各节点的 `classes/*.json`、班级教学建议 `class-plans/*.json`、跨节点观察 `node-pairings/*.json`、同源 `csv/`、字段说明 `fields.json`、自动核验 `acceptance.json` 和完整性标记 `manifest.json`。CSV 包含总览、课程、质量记录、逐学生逐节点的统计/诊断/计划/同伴比较/学生提示，以及班级报告、教学建议与跨节点配对；所有内容直接投影同一结果，不重新计算。`manifest.json` 最后写入；没有该文件表示导出未完成。`node modules/app/check-export.ts <导出目录> live` 核对版本、范围、证据、子报告、全部 CSV 与 JSON 的逐字段内容及 HTML 的 SHA-256；合成报告将最后的参数改为 `fixture`。缺失、篡改或不一致均返回非零退出码。当前导出格式为 `study-export-v2`，旧报告需在新目录重新导出后才能通过此完整性检查。自动核验不替代非作者队员真人复验。
 
-CSV 使用 UTF-8 BOM、逗号和 CRLF；按 `path`（payload 内的 JSON Pointer）定位每个对象或数组，`value/` 列展示直接字段，`row_type` 和 `length` 保留容器类型与数组长度。`types_json` 区分未知 `null`、真实数值 `0` 和空字符串；空单元格只表示该行不含此列。版本、状态及请求范围随行保留，根行记录总证据与限制。可能被表格软件识别为公式的文本添加一个单引号，`escaped_columns_json` 明确列出还原时应去掉此前缀的列；真正的负数保持数值。用表格软件导入时将编号列指定为文本，避免前导零被自动转换。完整字段解释见导出的 `fields.json`。
+所有结果的 `generated_at` 表示本批次分析开始时间，格式为 UTC ISO 8601 毫秒时间（例如 `2026-11-14T10:00:00.000Z`）。数据快照、数据/比较/诊断/引导结果、学生及班级子报告、页面动态比较和 JSON/CSV 下载共享同一时间；`manifest.json`、`fields.json`、`acceptance.json` 也记录该时间。页面下载和切换对象不会改变它，重新执行 CLI 分析才生成新时间；时间不参与 `dataset_version` 哈希，也不改变分数。独立 CLI 调用属于不同批次，不能要求其时间相同。复用统计、课程、诊断或班级分析时必须匹配版本、范围及批次时间。
+
+CSV 使用 UTF-8 BOM、逗号和 CRLF；按 `path`（payload 内的 JSON Pointer）定位每个对象或数组，`value/` 列展示直接字段，`row_type` 和 `length` 保留容器类型与数组长度。`types_json` 区分未知 `null`、真实数值 `0` 和空字符串；空单元格只表示该行不含此列。`generated_at`、版本、状态及请求范围随行保留，根行记录总证据与限制。可能被表格软件识别为公式的文本添加一个单引号，`escaped_columns_json` 明确列出还原时应去掉此前缀的列；真正的负数保持数值。用表格软件导入时将编号列指定为文本，避免前导零被自动转换。完整字段解释见导出的 `fields.json`。
+
+升级已有报告时，须用当前代码在新目录重新导出。旧版仅在 manifest 中写时间的报告不能通过当前检查；不要手工补时间冒充一次完整运行。`check-export` 拒绝缺失时间、无效日期、非 UTC 毫秒格式或批次不一致，并逐文件核对 JSON/CSV。当前仍使用 `team-v1`、`study-export-v2`、`study-csv-v1` 格式标识，新增字段不会改变 payload 的行结构；按列位置读 CSV 的下游应改为按列名读取。Harness 会话校验要求结果时间落在实际会话运行区间，再按该时间复算全部业务内容。
 
 赛事原始数据和派生报告保留在被 Git 忽略的 `tmp/study-data` 中，不随代码推送。不要将正式报告上传公网或提供给远程模型。界面展示是本地教师工具，未实现生产环境账户与权限体系。
 

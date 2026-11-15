@@ -36,6 +36,8 @@ node modules/data/cli.ts get_evidence --data tmp/study-data/input --records DR00
 
 来源 `row_number` 表示表头为第 1 行的 CSV 逻辑行编号，带换行的单元格仍算同一行。`dataset_version` 来自五张表排序去重后的内容摘要，行顺序和完全重复导入不影响版本；原始行位置仍随实际输入顺序变化。
 
+`PreparedDataset` 和所有 `ResultEnvelope` 必须携带 `generated_at`，表示分析批次开始的 UTC 毫秒时间（`YYYY-MM-DDTHH:mm:ss.sssZ`）。默认由准备函数生成，并传递到统计、证据、错误结果及后续模块；独立数据 CLI 的准备摘要和失败结果也带该字段。此时间不进入数据哈希。仅确定性测试或复算可以通过 `PrepareOptions.generated_at` 注入已验证的批次时间，CLI 不接受手工指定时间。统一报告的 JSON/CSV 和旧报告升级方式见[完整入口说明](../README.md#使用正式资料)。
+
 ## 验证
 
 根入口仅验证本业务模块，执行顺序为产物构建、严格类型检查、行为测试；它不等同于 Harness 全仓构建或现有 CI。

@@ -40,7 +40,7 @@ export interface ClassPlanPayload extends ClassScope {
 export function build_class_plan(dataset: PreparedDataset, scope: ClassScope,
   analysis: ReturnType<typeof analyze_class> = analyze_class(dataset, scope),
 ): ResultEnvelope<ClassPlanPayload> {
-  const matches = (['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode'] as const)
+  const matches = (['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode', 'generated_at'] as const)
     .every(key => analysis[key] === dataset[key]) && analysis.scope['class_id'] === scope.class_id
     && analysis.scope['node_id'] === scope.node_id && analysis.payload.class_id === scope.class_id && analysis.payload.node_id === scope.node_id
   const own = matches ? analysis : analyze_class(dataset, scope)

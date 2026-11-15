@@ -24,7 +24,7 @@ test('same-student current observations pair across nodes without reporting scor
   assert.ok(result.payload.reason_codes.includes('cross_node_progress_not_established'))
   const repeated = structuredClone(input)
   repeated.records = [...input.records, ...input.records].reverse()
-  assert.deepEqual(inspect_node_pairing(prepare_dataset(repeated), scope), result)
+  assert.deepEqual(inspect_node_pairing(prepare_dataset(repeated, { generated_at: result.generated_at }), scope), result)
   const reverse = inspect_node_pairing(prepare_dataset(input), { ...scope, left_node_id: 'M2', right_node_id: 'M1' })
   assert.deepEqual(reverse.payload.paired_item_ids, result.payload.paired_item_ids)
   assert.deepEqual(reverse.payload.items[0]!.left, pair.right)

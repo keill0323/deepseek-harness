@@ -90,7 +90,7 @@ test('node pairing displays gaps and exports the selected student/class and node
   const input = make_input([
     make_record(), make_record({ 记录编号: 'R2', 作答事件编号: 'E2', 节点编号: 'M2' }),
   ])
-  const { window, downloads } = await setup(t, input)
+  const { window, workspace, downloads } = await setup(t, input)
   click(window, '比较分析')
   choose(window, '测验节点', 'M1')
   choose(window, '比较方式', 'nodes')
@@ -103,11 +103,13 @@ test('node pairing displays gaps and exports the selected student/class and node
     if (mode === 'class') choose(window, '配对班级', 'C2')
     click(window, '导出当前 JSON')
     const json = JSON.parse(await downloads.at(-1)!.blob.text())
+    assert.equal(json.generated_at, workspace.generated_at)
     assert.equal(json.payload.kind, mode)
     assert.equal(json.payload.subject_id, mode === 'student' ? 'S1' : 'C2')
     assert.deepEqual(json.payload.paired_item_ids, mode === 'student' ? ['A1'] : [])
     click(window, '导出当前 CSV')
     assert.deepEqual(csv_payload(await downloads.at(-1)!.blob.text()), json.payload)
+    assert.ok(parse_csv(await downloads.at(-1)!.blob.text(), 'pairing.csv').every(row => row['generated_at'] === workspace.generated_at))
   }
   choose(window, '配对对象', 'student')
   choose(window, '测验节点', 'M2')
@@ -167,21 +169,24 @@ test('comparison review copy agrees with the displayed population and JSON/CSV e
 })
 
 test('current CSV matches the selected JSON after comparison and class scope changes', async t => {
-  const { window, downloads } = await setup(t)
+  const { window, workspace, downloads } = await setup(t)
   for (const view of ['比较分析', '班级报告', '课程依据', '质量复核']) {
     click(window, view)
     if (view === '比较分析') { choose(window, '比较方式', 'classes'); choose(window, '测验节点', 'CHECK-1') }
     if (view === '班级报告') choose(window, '选择班级', 'GROUP-B')
     click(window, '导出当前 JSON')
     const json = JSON.parse(await downloads.at(-1)!.blob.text())
+    assert.equal(json.generated_at, workspace.generated_at)
     click(window, '导出当前 CSV')
     const csv = await downloads.at(-1)!.blob.text()
     assert.equal(downloads.at(-1)!.blob.type, 'text/csv;charset=utf-8')
     assert.deepEqual(csv_payload(csv), json.payload)
+    assert.ok(parse_csv(csv, 'download.csv').every(row => row['generated_at'] === workspace.generated_at))
     assert.deepEqual(JSON.parse(parse_csv(csv, 'selected.csv')[0]!['scope_json']!), json.scope)
     if (view === '班级报告') {
       click(window, '导出班级教学建议')
       const plan = JSON.parse(await downloads.at(-1)!.blob.text())
+      assert.equal(plan.generated_at, workspace.generated_at)
       click(window, '导出班级建议 CSV')
       assert.deepEqual(csv_payload(await downloads.at(-1)!.blob.text()), plan.payload)
     }
@@ -189,14 +194,16 @@ test('current CSV matches the selected JSON after comparison and class scope cha
 })
 
 test('student practice CSV uses the same whitelist as JSON even after opening teacher solutions', async t => {
-  const { window, downloads } = await setup(t)
+  const { window, workspace, downloads } = await setup(t)
   click(window, '学习计划')
   choose(window, '内容模式', 'teacher')
   click(window, '导出学生练习清单')
   const json = JSON.parse(await downloads.at(-1)!.blob.text())
+  assert.equal(json.generated_at, workspace.generated_at)
   click(window, '导出学生练习 CSV')
   const csv = await downloads.at(-1)!.blob.text()
   assert.deepEqual(csv_payload(csv), json.payload)
+  assert.ok(parse_csv(csv, 'download.csv').every(row => row['generated_at'] === workspace.generated_at))
   for (const privateValue of ['teacher_solution', 'reference_answer', 'original_values', 'z>-3', 'z<-3', '评分点得分']) assert.ok(!csv.includes(privateValue))
 })
 
@@ -204,6 +211,7 @@ test('offline teacher report navigates seven pages without loading external reso
   const { window, networkRequests } = await setup(t)
   const labels = ['总览', '学生诊断', '学习计划', '比较分析', '班级报告', '课程依据', '质量复核']
   assert.equal(window.document.querySelectorAll('nav button').length, 7)
+  assert.ok(mainText(window).includes('分析时间（UTC）：'))
   for (const label of labels) {
     click(window, label)
     assert.equal(window.document.querySelector('h1')?.textContent, label)

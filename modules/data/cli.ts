@@ -52,6 +52,7 @@ function identifiers(value: string): string[] {
  * @returns Zero on a valid or partial result, one on a rejected request.
  */
 export async function run_cli(args: string[]): Promise<number> {
+  const generated_at = new Date().toISOString()
   try {
     const { command, values, flags } = parseArguments(args)
     if (command === 'help' || command === '--help') {
@@ -71,11 +72,11 @@ export async function run_cli(args: string[]): Promise<number> {
     for (const name of values.keys()) if (!allowed.has(name)) throw new Error(`${command} 不支持 ${name}`)
     if (flags.has('--history') && command !== 'get_evidence') throw new Error('--history 仅供证据查询使用')
     const input = await load_dataset(required(values, '--data'))
-    const dataset = prepare_dataset(input, { source_mode: flags.has('--fixture') ? 'fixture' : 'live' })
+    const dataset = prepare_dataset(input, { generated_at, source_mode: flags.has('--fixture') ? 'fixture' : 'live' })
     let output: unknown
     if (command === 'prepare_dataset') {
       output = {
-        schema_version: dataset.schema_version,
+        schema_version: dataset.schema_version, generated_at: dataset.generated_at,
         dataset_version: dataset.dataset_version,
         policy_version: dataset.policy_version,
         producer_version: dataset.producer_version,
@@ -113,7 +114,7 @@ export async function run_cli(args: string[]): Promise<number> {
     return typeof output === 'object' && output !== null && 'result_status' in output && output.result_status === 'error' ? 1 : 0
   } catch (error) {
     process.stdout.write(`${JSON.stringify({
-      schema_version: 'team-v1', dataset_version: 'unavailable', policy_version: 'team-policy-v1',
+      schema_version: 'team-v1', generated_at, dataset_version: 'unavailable', policy_version: 'team-policy-v1',
       producer_version: 'study-data@0.1.0', source_mode: args.includes('--fixture') ? 'fixture' : 'live', scope: {},
       result_status: 'error', payload: null, evidence_ids: [],
       limitations: [error instanceof Error ? error.message : '数据操作失败'],

@@ -20,7 +20,7 @@ function ordinary_input(): DatasetInput {
 }
 
 function assert_versions(result: ResultEnvelope<unknown>, reference: ResultEnvelope<unknown>): void {
-  for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode'] as const) {
+  for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode', 'generated_at'] as const) {
     assert.equal(result[key], reference[key], `Inconsistent ${key}`)
   }
 }
