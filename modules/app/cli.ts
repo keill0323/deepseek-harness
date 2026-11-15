@@ -9,6 +9,9 @@ import { prepare_workspace_dataset } from './pipeline.ts'
 import { render_report } from './report.ts'
 import { verify_workspace } from './verify.ts'
 import { CSV_FORMAT, csv_exports, result_to_csv } from './csv.ts'
+import { build_student_pack, render_student_document, STUDENT_PRACTICE_FORMAT } from './student.ts'
+import { load_student_assets } from './student-report.ts'
+import { scope_key } from '../shared/result.ts'
 
 const HELP = `智慧学伴完整本地工具
   npm run study:build
@@ -16,7 +19,7 @@ const HELP = `智慧学伴完整本地工具
   node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request <JSON>
   node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request-file <JSON文件> [--out <新文件>] [--format json|csv] [--summary-only]
 操作：get_student_stats、get_evidence、compare_students、compare_with_peers、analyze_class、compare_classes、inspect_node_pairing、get_curriculum、diagnose_student、build_learning_plan、build_class_plan、get_hint、workspace。
-export 导出独立交互HTML、同源JSON/CSV成果、字段说明和自动核验。--fixture 标识测试数据。
+export 导出教师HTML、每名学生每个节点的独立练习HTML、同源JSON/CSV成果、字段说明和自动核验。--fixture 标识测试数据。
 --summary-only 仅回传结果状态与本地文件路径，供Harness调用；run时必须同时指定--out。
 `
 
@@ -113,6 +116,7 @@ export async function run_companion_cli(args: string[]): Promise<number> {
       findings: '事实、有限推断、证据不足、评分复核分别标明', source_mode: 'live为实际输入，fixture为开发样例',
       engine: 'local_rules为本地统计与规则；不表示远程LLM输出',
       structures: {
+        student_practice: { format: STUDENT_PRACTICE_FORMAT, files: 'student-pages/中每个HTML仅包含一名学生一个节点的题目、活动与学生提示；只能分发对应的单个HTML文件，整个导出目录是教师资料', scope: '没有切换学生、教师答案或其他同学的数据，也不需要访问教师报告', progress: '完成与自查为学生自主记录，不代表自动评分；页面内保留，关闭前可导出学习记录' },
         workspace: { students: '输入学生及班级名单', nodes: '测验节点与测量范围', summary: '原始行、当前事件和质量处理计数', cases: '以学生编号:节点编号索引的完整个体结果', class_reports: '以班级编号:节点编号索引的群体结果（含逐题与评分点事件分布）', class_plans: '同班同节点的分组教学建议，含对象、依据、实施步骤、观察与调整条件', node_pairings: '每个学生及班级的节点两两配对，键含对象类型、编号与两个节点，按片段编码；只报告可配对观察与限制', curriculum: '课程主题、指标与材料定位', quality_records: '待复核的当前记录', browser_snapshot: '仅供本地教师报告计算比较及核对证据，题库参考答案和解析已去除' },
         result: { scope: '本次操作明确选择的学生、班级、节点或展示模式', payload: '操作特定结果', limitations: '影响解释和适用范围的限制' },
         evidence: { record_id: '记录编号', event_id: '独立作答事件', revision: '十进制正整数修订版本', student_id: '模拟学生编号', item_id: '题目材料编号', topic_id: '主题编号', node_id: '测验节点', grading_status: '原始评分状态', score: '记录得分，缺失或无效为null', max_score: '记录满分', answer: '原始最终作答，仅限教师证据', steps: '原始过程，仅限教师证据', point_scores: '原始分点评分', include_in_statistics: '是否允许参与统计', action: 'include纳入、exclude正常未评分排除、review人工复核', quality_issues: '问题代码与原因', original_values: '不改写的导入字段', source: '来源CSV与逻辑行编号' },
@@ -138,17 +142,28 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     for (const [key, entry] of Object.entries(workspace.payload.node_pairings)) {
       await writeNew(join(directory, 'node-pairings', `${encodeURIComponent(key)}.json`), entry)
     }
+    const studentAssets = await load_student_assets()
+    const studentPages: Array<{ student_id: string; node_id: string; path: string; sha256: string }> = []
+    await mkdir(join(directory, 'student-pages'))
+    for (const node of workspace.payload.nodes) for (const student of workspace.payload.students) {
+      const pack = build_student_pack(workspace, student.student_id, node.node_id)
+      const page = render_student_document(pack, studentAssets)
+      const path = `student-pages/${encodeURIComponent(scope_key(student.student_id, node.node_id))}.html`
+      await writeFile(join(directory, path), page, { encoding: 'utf8', flag: 'wx' })
+      studentPages.push({ student_id: student.student_id, node_id: node.node_id, path, sha256: createHash('sha256').update(page).digest('hex') })
+    }
     const csvFiles = csv_exports(workspace)
     for (const [name, entry] of csvFiles) {
       const path = join(directory, 'csv', name)
       await mkdir(dirname(path), { recursive: true })
       await writeFile(path, result_to_csv(entry), { encoding: 'utf8', flag: 'wx' })
     }
-    await writeFile(join(directory, 'README.txt'), '双击index.html查看本地交互报告。workspace.json及students、classes、class-plans、node-pairings为可机读成果，csv为同源表格投影，fields.json解释字段和CSV还原规则。页面支持当前结果、学生练习与班级建议的CSV下载。acceptance.json仅记录自动核验，真人复验仍待完成。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
+    await writeFile(join(directory, 'README.txt'), 'index.html是教师工作台，workspace.json及students、classes、class-plans、node-pairings为教师分析成果，csv为同源表格投影。student-pages中每份HTML是单学生单节点练习页，只分发对应的单个HTML；不要把教师报告或整个目录发给学生，也不要把整个目录公开托管。学生页包含练习、分级提示、自查和学习记录导出，不含教师答案、原始作答或其他学生数据；完成状态是自主记录，不是自动评分。fields.json解释字段，acceptance.json记录自动核验。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
     await writeNew(join(directory, 'manifest.json'), {
       status: 'complete', generated_at: workspace.generated_at, schema_version: workspace.schema_version, dataset_version: workspace.dataset_version,
       policy_version: workspace.policy_version, producer_version: workspace.producer_version, source_mode: workspace.source_mode,
-      export_format_version: 'study-export-v2', csv_format: CSV_FORMAT, csv_files: csvFiles.map(([name]) => `csv/${name}`),
+      export_format_version: 'study-export-v3', csv_format: CSV_FORMAT, csv_files: csvFiles.map(([name]) => `csv/${name}`),
+      student_practice_format: STUDENT_PRACTICE_FORMAT, student_pages: studentPages,
       entry: 'index.html', report_sha256: createHash('sha256').update(html).digest('hex'), verification: 'acceptance.json', machine_readable: 'workspace.json', human_review: 'pending',
     })
     process.stdout.write(`${JSON.stringify({

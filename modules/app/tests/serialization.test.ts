@@ -72,7 +72,7 @@ test('the exported pooled report boots offline and renders literal markup safely
   window.eval(`${script.replace(/^export\s+/gm, '')}\nglobalThis.__restoredWorkspace = WORKSPACE;`)
   const restored: unknown = window.eval('JSON.parse(JSON.stringify(globalThis.__restoredWorkspace))')
   assert.deepEqual(JSON.parse(JSON.stringify(restored)), JSON.parse(JSON.stringify(workspace)))
-  assert.equal(window.document.querySelector('h1')?.textContent, '总览')
+  assert.equal(window.document.querySelector('h1')?.textContent, '教师工作台')
   assert.equal(window.document.querySelectorAll('nav button').length, 7)
   assert.equal(window.document.querySelectorAll('script[src],link[href],iframe,img').length, 0)
   assert.equal(networkRequests, 0)

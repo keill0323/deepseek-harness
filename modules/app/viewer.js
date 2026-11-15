@@ -14,8 +14,18 @@ const vState = {
   node: vNodes.at(-1)?.node_id ?? '', comparisonMode: 'peers', secondStudent: vStudents[1]?.student_id ?? vStudents[0]?.student_id ?? '',
   leftClass: vWorkspace.classes[0] ?? '', rightClass: vWorkspace.classes[1] ?? vWorkspace.classes[0] ?? '',
   selectedClass: vWorkspace.classes[0] ?? '', notes: Object.create(null),
-  qualityScope: 'all', qualitySearch: '', hintStates: new Map(),
+  qualityScope: 'all', qualitySearch: '', hintStates: new Map(), rosterSearch: '',
 }
+const vExpanded = new Set()
+const vComparisonCache = new Map()
+let vToast
+let vToastTimer
+let vExportMenu
+let vExportStatus
+let vExportStatusText
+let vExportRetry
+let vCsvPending = null
+let vStudentControls
 let vCurrentExport = WORKSPACE
 const vExportButtons = []
 let vMain
@@ -57,10 +67,74 @@ function vSelect(label, choices, selected, change) {
   return { wrapper: vEl('label', 'field', vEl('span', 'field-label', label), select), select }
 }
 
+function vSegments(label, choices, selected, change) {
+  const field = vSelect(label, choices, selected, change)
+  field.wrapper.classList.add('segment-select')
+  const group = vEl('div', 'segment-control')
+  group.setAttribute('role', 'group')
+  group.setAttribute('aria-label', label)
+  for (const choice of choices) {
+    const button = vButton(choice.label, () => change(choice.value), 'segment-button')
+    button.setAttribute('aria-pressed', String(choice.value === selected))
+    button.dataset.control = `${label}:${choice.value}`
+    group.append(button)
+  }
+  return vEl('div', 'segment-field', group, field.wrapper)
+}
+
+function vViewScope() {
+  return JSON.stringify([vState.view, vState.student, vState.node, vState.selectedClass, vState.comparisonMode,
+    vState.secondStudent, vState.leftClass, vState.rightClass, vState.pairingType, vState.pairingRightNode, vState.planMode])
+}
+
+function vLazyDetails(className, label, build, key = label) {
+  const details = vEl('details', className, vEl('summary', '', label))
+  const stateKey = `${vViewScope()}:${key}`
+  details.dataset.disclosureKey = stateKey
+  let built = false
+  const reveal = () => {
+    if (details.open && !built) { details.append(...[build()].flat(Infinity).filter(value => value != null)); built = true }
+    if (details.open) vExpanded.add(stateKey)
+    else vExpanded.delete(stateKey)
+  }
+  details.addEventListener('toggle', reveal)
+  // Materialize synchronously for keyboard, pointer and restored state alike.
+  details.addEventListener('click', event => {
+    if (event.target.closest('summary') !== details.firstElementChild) return
+    event.preventDefault()
+    details.open = !details.open
+    reveal()
+  })
+  details.open = vExpanded.has(stateKey)
+  reveal()
+  return details
+}
+
+function vCachedComparison(kind, scope, calculate) {
+  const key = JSON.stringify([kind, scope])
+  if (vComparisonCache.has(key)) {
+    const value = vComparisonCache.get(key)
+    vComparisonCache.delete(key)
+    vComparisonCache.set(key, value)
+    return value
+  }
+  const value = calculate()
+  vComparisonCache.set(key, value)
+  if (vComparisonCache.size > 32) vComparisonCache.delete(vComparisonCache.keys().next().value)
+  return value
+}
+
+function vFeedback(message) {
+  clearTimeout(vToastTimer)
+  vToast.textContent = message
+  vToast.hidden = false
+  vToastTimer = setTimeout(() => { vToast.hidden = true }, 3500)
+}
+
 function vStudentLookup() {
   const input = vEl('input', 'search-input')
   input.type = 'search'
-  input.placeholder = '编号或班级，Enter 定位'
+  input.placeholder = '查找学生…'
   input.setAttribute('aria-label', '快速查找学生')
   input.setAttribute('list', 'student-search-options')
   input.autocomplete = 'off'
@@ -88,6 +162,7 @@ function vStudentLookup() {
       vState.student = found.student_id
       vStudentSelect.value = found.student_id
       status.textContent = `已选择 ${found.student_id}`
+      if (!['overview', 'diagnosis', 'plan', 'comparison'].includes(vState.view)) vState.view = 'diagnosis'
       vRender()
     }
   }
@@ -99,7 +174,7 @@ function vStudentLookup() {
   })
   vStudentSearch = input
   vStudentSearchStatus = status
-  return vEl('label', 'field student-search-field', vEl('span', 'field-label', '快速查找学生 · /'), input, choices, status)
+  return vEl('label', 'field student-search-field', input, choices, status)
 }
 
 function vClearStudentSearch() {
@@ -128,7 +203,14 @@ function vEmpty(message) {
 }
 
 function vMetrics(metrics) {
-  return vEl('div', 'metrics', metrics.map(metric => vEl('div', 'metric', vEl('span', 'metric-label', metric.label), vEl('strong', 'metric-value', metric.value), metric.detail ? vEl('span', 'metric-detail', metric.detail) : null)))
+  return vEl('div', 'metrics', metrics.map(metric => {
+    const value = typeof metric.value === 'string' && metric.value.endsWith(' 个百分点')
+      ? [metric.value.replace(' 个百分点', ''), vEl('span', 'metric-unit', ' 个百分点')]
+      : metric.value
+    return vEl('div', 'metric', vEl('span', 'metric-label', metric.label),
+      vEl('strong', ['暂无可计分证据', '暂无可比结果'].includes(metric.value) ? 'metric-value metric-empty' : 'metric-value', value),
+      metric.detail ? vEl('span', 'metric-detail', metric.detail) : null)
+  }))
 }
 
 function vTable(columns, rows, emptyMessage = '当前范围没有记录。') {
@@ -138,17 +220,115 @@ function vTable(columns, rows, emptyMessage = '当前范围没有记录。') {
   return vEl('div', 'table-scroll', vEl('table', 'data-table', vEl('thead', '', head), vEl('tbody', '', body)))
 }
 
-function vDownload(value, filename) {
-  if (!value) return
-  const csv = filename.endsWith('.csv')
-  const url = URL.createObjectURL(new Blob([csv ? result_to_csv(value) : `${JSON.stringify(value, null, 2)}\n`], { type: csv ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }))
+function vUpdateExportButtons() {
+  for (const button of vExportButtons) {
+    button.textContent = `导出${vState.view === 'overview' ? '全部' : '当前'} ${button.dataset.exportFormat.toUpperCase()}`
+    button.disabled = !vCurrentExport || (button.dataset.exportFormat === 'csv' && Boolean(vCsvPending))
+  }
+  for (const button of vMain.querySelectorAll('[data-export-format="csv"]')) button.disabled = Boolean(vCsvPending)
+}
+
+function vCsvButton(label, value, filename) {
+  const button = vButton(label, () => vDownload(value(), filename()))
+  button.dataset.exportFormat = 'csv'
+  return button
+}
+
+function vSaveDownload(blob, filename) {
+  const url = URL.createObjectURL(blob)
   const anchor = vEl('a')
   anchor.href = url
   anchor.download = filename
-  document.body.append(anchor)
-  anchor.click()
-  anchor.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  try {
+    document.body.append(anchor)
+    anchor.click()
+  } finally {
+    anchor.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const kind = filename.endsWith('.html') ? '学生练习页' : filename.endsWith('.csv') ? 'CSV' : 'JSON'
+  vFeedback(`已生成 ${kind}，下载已发起`)
+}
+
+function vDownloadStudentPage() {
+  try {
+    const pack = build_student_pack(WORKSPACE, vState.student, vState.node)
+    const html = render_student_document(pack, STUDENT_ASSETS)
+    const returnFocus = document.activeElement?.closest('.export-menu')?.querySelector('summary')
+    for (const menu of document.querySelectorAll('.export-menu[open]')) menu.open = false
+    returnFocus?.focus({ preventScroll: true })
+    vSaveDownload(new Blob([html], { type: 'text/html;charset=utf-8' }), `${encodeURIComponent(vState.student)}-${encodeURIComponent(vState.node)}-练习.html`)
+  } catch (error) {
+    vFeedback('学生页未生成，请核对当前学生和测验节点')
+  }
+}
+
+function vDownloadCsv(value, filename) {
+  const job = { worker: null, url: null }
+  vCsvPending = job
+  vExportStatus.hidden = false
+  vExportStatus.dataset.state = 'pending'
+  vExportStatusText.textContent = '正在生成 CSV…'
+  vExportRetry.hidden = true
+  vExportRetry.onclick = null
+  vUpdateExportButtons()
+  const showError = () => {
+    vExportStatus.dataset.state = 'error'
+    vExportStatusText.textContent = 'CSV 未生成，请重试'
+    vExportRetry.hidden = false
+    vExportRetry.onclick = () => vDownload(value, filename)
+  }
+  const finish = blob => {
+    if (vCsvPending !== job) return
+    job.worker?.terminate()
+    if (job.url) URL.revokeObjectURL(job.url)
+    vCsvPending = null
+    vUpdateExportButtons()
+    if (blob) {
+      try {
+        vSaveDownload(blob, filename)
+      } catch (error) {
+        showError()
+        return
+      }
+      vExportStatus.hidden = true
+      return
+    }
+    showError()
+  }
+  try {
+    const source = `${CSV_WORKER_SOURCE}\nself.onmessage = event => {
+      try {
+        const blob = new Blob([result_to_csv(event.data)], { type: 'text/csv;charset=utf-8' });
+        self.postMessage({ ok: true, blob });
+      } catch (error) {
+        self.postMessage({ ok: false });
+      }
+    };`
+    job.url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }))
+    job.worker = new Worker(job.url, { type: 'module' })
+    job.worker.onmessage = event => finish(event.data?.ok === true && event.data.blob instanceof Blob ? event.data.blob : null)
+    job.worker.onerror = event => { event.preventDefault(); finish(null) }
+    job.worker.onmessageerror = () => finish(null)
+    job.worker.postMessage(value)
+  } catch (error) {
+    finish(null)
+  }
+}
+
+function vDownload(value, filename) {
+  if (!value) return
+  const csv = filename.endsWith('.csv')
+  if (csv && vCsvPending) return
+  const returnFocus = document.activeElement === vExportRetry ? vExportMenu.querySelector('summary')
+    : document.activeElement?.closest('.export-menu')?.querySelector('summary')
+  for (const menu of document.querySelectorAll('.export-menu[open]')) menu.open = false
+  returnFocus?.focus({ preventScroll: true })
+  if (csv && typeof Worker === 'function' && typeof CSV_WORKER_SOURCE === 'string' && CSV_WORKER_SOURCE) {
+    vDownloadCsv(value, filename)
+    return
+  }
+  vSaveDownload(new Blob([csv ? result_to_csv(value) : `${JSON.stringify(value, null, 2)}\n`], { type: csv ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8' }), filename)
 }
 
 function vCase() {
@@ -162,7 +342,6 @@ function vScopeKey(entity, node) {
 function vEvidenceBody(record) {
   const issues = record.quality_issues.map(issue => vEl('li', '', issue.message))
   return vEl('div', 'evidence-body',
-    vEl('p', 'notice', '教师证据视图包含原始模拟作答。它不属于学生提示，也不提供生产环境身份认证。'),
     vEl('dl', 'evidence-meta',
       vEl('dt', '', '学生 / 题目 / 节点'), vEl('dd', '', `${record.student_id} / ${record.item_id} / ${record.node_id}`),
       vEl('dt', '', '作答事件 / 修订'), vEl('dd', '', `${record.event_id} / v${record.revision}`),
@@ -179,16 +358,21 @@ function vEvidenceBody(record) {
 function vOpenEvidence(id) {
   const record = vRecords.get(id)
   const dialog = vEl('dialog', 'evidence-dialog')
+  const trigger = document.activeElement
   const close = () => dialog.close()
   dialog.append(vEl('div', 'dialog-heading', vEl('h2', '', `作答证据 ${id}`), vButton('关闭', close)), record ? vEvidenceBody(record) : vEmpty('报告未包含这条原始记录，不能核对其内容。'))
-  dialog.addEventListener('close', () => dialog.remove(), { once: true })
+  dialog.setAttribute('aria-label', `作答证据 ${id}`)
+  dialog.addEventListener('close', () => { dialog.remove(); trigger?.focus({ preventScroll: true }) }, { once: true })
   dialog.addEventListener('click', event => { if (event.target === dialog) close() })
   document.body.append(dialog)
   dialog.showModal()
 }
 
 function vEvidenceLinks(ids) {
-  return vEl('div', 'evidence-links', [...new Set(ids)].map(id => vButton(id, () => vOpenEvidence(id), 'evidence-link')))
+  const unique = [...new Set(ids)]
+  const link = id => vButton(id, () => vOpenEvidence(id), 'evidence-link')
+  return vEl('div', 'evidence-links', unique.slice(0, 3).map(link), unique.length > 3
+    ? vLazyDetails('evidence-overflow', `另 ${unique.length - 3} 条`, () => vEl('div', 'evidence-links', unique.slice(3).map(link)), `evidence:${unique.join('|')}`) : null)
 }
 
 function vLimitations(result) {
@@ -197,47 +381,132 @@ function vLimitations(result) {
 }
 
 function vShow(view, student) {
+  if (view === vState.view && (!student || student === vState.student)) return
   vState.view = view
   if (student) vState.student = student
   vStudentSelect.value = vState.student
   if (student) vClearStudentSearch()
-  vRender()
+  vRender({ navigate: true })
+}
+
+function vOpenComparison(mode) {
+  const classId = vStudents.find(student => student.student_id === vState.student)?.class_id
+  vState.comparisonMode = mode
+  if (mode === 'classes') {
+    vState.leftClass = classId
+    vState.rightClass = vWorkspace.classes.find(id => id !== classId) ?? classId
+  }
+  if (mode === 'students' && vState.secondStudent === vState.student) vState.secondStudent = vStudents.find(student => student.student_id !== vState.student)?.student_id ?? vState.student
+  if (mode === 'nodes') vState.pairingType = 'student'
+  vShow('comparison')
+}
+
+function vOpenCurriculum(indicator) {
+  vState.curriculumFocus = indicator
+  vState.curriculumReturn = vState.view
+  vShow('curriculum')
+  const target = [...vMain.querySelectorAll('[data-indicator]')].find(element => element.dataset.indicator === indicator)
+  target?.scrollIntoView({ block: 'center', behavior: 'auto' })
+  target?.focus({ preventScroll: true })
+}
+
+function vFeatureSection(title, className, ...content) {
+  const section = vEl('section', `feature-section ${className}`, vEl('div', 'feature-heading', vEl('h3', '', title)), ...content)
+  section.setAttribute('aria-label', title)
+  return section
+}
+
+function vStudentFocus() {
+  const item = vCase()
+  if (!item) return vEmpty('当前学生没有可用的分析结果')
+  const student = vStudents.find(value => value.student_id === vState.student)
+  const findings = item.diagnosis.payload.findings
+  const finding = ['scoring_review', 'fact', 'inference', 'insufficient_data'].flatMap(category => findings.filter(value => value.category === category && value.finding_type !== 'observed_performance'))[0] ?? findings[0]
+  const firstIds = item.plan.payload.delivery?.first_activity_ids
+  const activities = firstIds ? item.plan.payload.activities.filter(activity => firstIds.includes(activity.activity_id)) : item.plan.payload.activities
+  const activity = activities[0]
+  const indicator = finding?.indicator_id ?? activity?.indicator_id
+  const curriculum = vWorkspace.curriculum.payload.entries.find(entry => entry.indicator_id === indicator)
+  const evidence = finding?.evidence_ids.find(id => vRecords.has(id))
+  const categories = { fact: '已有作答事实', inference: '待进一步确认', insufficient_data: '需要补充观察', scoring_review: '评分待复核' }
+  const diagnosis = vFeatureSection('诊断定位', 'focus-diagnosis',
+    vEl('h4', 'feature-result', finding?.title ?? '暂无可用诊断'),
+    vEl('p', 'feature-meta', finding ? categories[finding.category] : '补充记录后再分析'),
+    finding?.step_refs.length ? vEl('p', 'finding-step', `定位到第 ${finding.step_refs.join('、')} 步`) : null,
+    vEl('div', 'feature-actions', vButton('查看完整诊断', () => vShow('diagnosis')),
+      evidence ? vButton('回看作答证据', () => vOpenEvidence(evidence), 'text-button') : null))
+  const planButton = vButton('查看练习与提示', () => { vState.planMode = 'student'; vShow('plan') }, 'button button-primary')
+  const plan = vFeatureSection('下一步练习', 'feature-primary',
+    vEl('h4', 'feature-result', activity?.goal ?? '暂未生成学习活动'),
+    vEl('p', 'feature-meta', activity ? `${vKindNames[item.plan.payload.plan_type]} · 本轮 ${activities.length} 项活动` : '请先补充记录或核对诊断'),
+    vEl('div', 'feature-actions', planButton,
+      vButton('导出独立学生页', vDownloadStudentPage, 'text-button')))
+  const course = vFeatureSection('课程与材料依据', 'focus-course',
+    vEl('h4', 'feature-result', curriculum?.indicator_description ?? '当前没有匹配的课程指标'),
+    curriculum ? vEl('p', 'feature-meta', `${curriculum.indicator_id} · ${curriculum.material_ids.length} 份关联材料`) : null,
+    vEl('div', 'feature-actions', vButton(curriculum ? '定位课程要求' : '查看课程索引', () => curriculum ? vOpenCurriculum(curriculum.indicator_id) : vShow('curriculum'), 'text-button')))
+  const comparison = item.peers.payload
+  const comparable = comparison.left_rate !== null && comparison.right_rate !== null
+  const comparisonBody = comparable ? vEl('div', 'comparison-preview', [['本人', comparison.left_rate], ['同班同伴', comparison.right_rate]].map(([label, rate]) => {
+    const progress = vEl('progress', 'comparison-bar')
+    progress.max = 1
+    progress.value = rate
+    progress.setAttribute('aria-label', `${label}共同题集得分率`)
+    return vEl('div', 'comparison-preview-row', vEl('span', '', label), progress, vEl('span', '', vRate(rate)))
+  })) : vEl('p', 'feature-description', '暂无共同有效题，暂不能比较')
+  const compare = vFeatureSection('学情比较', 'focus-comparison', comparisonBody,
+    vEl('p', 'feature-meta', `共同有效题 ${comparison.shared_item_ids.length} 道 · 同伴已排除本人`),
+    vEl('div', 'compare-shortcuts', [['peers', '同伴比较'], ['students', '两名学生'], ['classes', '两个班级'], ['nodes', '跨节点配对']].map(([mode, label]) => {
+      const button = vButton(label, () => vOpenComparison(mode), 'text-button')
+      button.disabled = mode === 'nodes' && vNodes.length < 2
+      if (button.disabled) button.title = '需要两个测验节点'
+      return button
+    })))
+  return vEl('section', 'focus-workspace',
+    vEl('div', 'focus-workspace-heading', vEl('h2', '', `${student.student_id} 的学习情况`),
+      vEl('span', 'feature-meta', `${student.class_id} · ${vState.node} · ${item.statistics.payload.valid_record_count} 条有效作答`)),
+    vEl('div', 'focus-grid', diagnosis, plan, course, compare))
 }
 
 function vOverview() {
   vCurrentExport = { ...WORKSPACE, payload: { ...vWorkspace, browser_snapshot: undefined } }
-  vMain.append(vMetrics([
-    { label: '模拟学生', value: vStudents.length, detail: `${vWorkspace.classes.length} 个模拟班级` },
-    { label: '当前作答事件', value: vWorkspace.summary.current_event_count, detail: `${vWorkspace.summary.raw_record_count} 行原始记录，先选最高修订` },
-    { label: '有效计分记录', value: vWorkspace.summary.stat_included_count, detail: '实际进入统计的当前记录' },
-    { label: '等待复核', value: vWorkspace.summary.review_count, detail: '复核标记；结构冲突项暂不计分' },
-  ]))
-  const preferred = ['D01', 'D14', 'D17'].filter(id => vStudents.some(student => student.student_id === id))
-  const representatives = [...new Set([...preferred, ...vStudents.map(student => student.student_id)])].slice(0, 3)
-  vMain.append(vPanel('从一个学习问题开始', '切换学生和测验节点，沿着表现、诊断、学习活动查看依据。',
-    vEl('div', 'case-grid', representatives.map(id => {
-      const item = vWorkspace.cases[vScopeKey(id, vState.node)]
-      const stats = item.statistics.payload
-      return vEl('article', 'case-card', vEl('div', 'case-heading', vEl('h3', '', id), vBadge(item.diagnosis.result_status)),
-        vEl('p', 'case-score', vRate(stats.score_rate)), vEl('p', 'muted', `${stats.valid_record_count} 条有效记录 · ${item.diagnosis.payload.covered_indicator_ids.length} 个已观察指标`),
-        vEl('p', 'case-description', `${vKindNames[item.plan.payload.plan_type]}；结论仅适用于当前节点已观察的内容。`),
-        vButton('查看诊断', () => vShow('diagnosis', id), 'button button-primary'))
-    }))))
-  vMain.append(vPanel('三个任务，一条依据链', '每一步都能回到课程索引、原始记录和具体学习材料。',
-    vEl('div', 'workflow', [
-      ['01', '理解学科', `梳理主题、${vWorkspace.curriculum.payload.entries.length}个观察指标、课标页码与相关教材。`, 'curriculum'],
-      ['02', '理解学生', '区分已观察事实、有限推断、证据不足和评分待复核。', 'diagnosis'],
-      ['03', '理解教学', '把建议落实为练习、提示、观察与调整条件。', 'plan'],
-    ].map(([number, title, description, view]) => vEl('article', 'workflow-step', vEl('span', 'step-number', number), vEl('h3', '', title), vEl('p', 'muted', description), vButton('打开', () => vShow(view), 'text-button'))))))
-  vMain.append(vEl('p', 'page-note', `分析时间（UTC）：${WORKSPACE.generated_at}。本报告全部由同一数据快照生成。模拟记录用于核验任务质量，不能据此证明真实教学成效。`))
+  vMain.append(vEl('div', 'overview-summary',
+    vEl('p', '', `全体 ${vStudents.length} 名学生 · ${vWorkspace.classes.length} 个班级 · ${vWorkspace.summary.stat_included_count} 条有效计分`),
+    vEl('div', 'feature-actions', vButton('查看本班报告', () => { vState.selectedClass = vStudents.find(student => student.student_id === vState.student).class_id; vShow('classes') }, 'text-button'),
+      vButton(`质量复核（${vWorkspace.summary.review_count} 条待核）`, () => { vState.qualityScope = 'all'; vState.qualitySearch = ''; vShow('quality') }, 'text-button'))), vStudentFocus())
+  const list = vEl('div', 'student-list')
+  const input = vEl('input', 'search-input')
+  input.type = 'search'
+  input.value = vState.rosterSearch
+  input.placeholder = '筛选学生编号或班级'
+  input.setAttribute('aria-label', '筛选学生列表')
+  const count = vEl('span', 'muted')
+  count.setAttribute('role', 'status')
+  const render = () => {
+    const query = vState.rosterSearch.trim().normalize('NFKC').toLowerCase()
+    const students = vStudents.filter(student => `${student.student_id} ${student.class_id}`.toLowerCase().includes(query))
+    count.textContent = `${students.length} 名学生`
+    list.replaceChildren(vTable([
+      { label: '学生', render: student => vEl('div', '', vButton(student.student_id, () => vShow('diagnosis', student.student_id), 'student-link text-button'), vEl('span', 'student-class', student.class_id)) },
+      { label: '得分率', render: student => vRate(vWorkspace.cases[vScopeKey(student.student_id, vState.node)].statistics.payload.score_rate) },
+      { label: '已观察指标', render: student => vWorkspace.cases[vScopeKey(student.student_id, vState.node)].diagnosis.payload.covered_indicator_ids.length },
+      { label: '当前学习安排', render: student => vKindNames[vWorkspace.cases[vScopeKey(student.student_id, vState.node)].plan.payload.plan_type] },
+      { label: '操作', render: student => vEl('div', 'row-actions', vButton('查看诊断', () => vShow('diagnosis', student.student_id), 'text-button'), vButton('学习计划', () => vShow('plan', student.student_id), 'text-button')) },
+    ], students, '没有匹配的学生'))
+  }
+  input.addEventListener('input', () => { vState.rosterSearch = input.value; render() })
+  const roster = vPanel('学生概况', '', vEl('div', 'roster-controls', input, count), list)
+  roster.classList.add('overview-roster')
+  vMain.append(roster)
+  render()
 }
 
 function vStatistics(stats) {
   return vMetrics([
     { label: '有效作答得分率', value: vRate(stats.score_rate), detail: stats.possible_score === null ? '缺记录保持未知' : `${stats.earned_score} / ${stats.possible_score} 分` },
-    { label: '有效 / 已有记录', value: `${stats.valid_record_count} / ${stats.record_count}`, detail: '语义复核可保留原分，结构冲突暂不计分' },
+    { label: '有效 / 已有记录', value: `${stats.valid_record_count} / ${stats.record_count}`, detail: '条作答记录' },
     { label: '已观察指标', value: stats.indicators.filter(indicator => indicator.valid_record_count > 0).length, detail: `共 ${stats.indicators.length} 个课程观察指标` },
-    { label: '评分待复核', value: stats.review_record_ids.length, detail: '不由疑点推断知识漏洞' },
+    { label: '评分待复核', value: stats.review_record_ids.length, detail: '条记录' },
   ])
 }
 
@@ -246,29 +515,36 @@ function vDiagnosis() {
   if (!item) return vMain.append(vEmpty('当前对象没有可用的分析结果。'))
   vCurrentExport = item.diagnosis
   const stats = item.statistics.payload
-  vMain.append(vStatistics(stats))
-  vMain.append(vPanel('主题与指标覆盖', '得分率只描述已有有效作答；无记录和未教学分别显示。',
+  vMain.append(vStatistics(stats), vEl('div', 'analysis-actions',
+    vButton('查看学习计划', () => vShow('plan'), 'button button-primary'),
+    vButton('与同伴比较', () => { vState.comparisonMode = 'peers'; vShow('comparison') })))
+  const renderFinding = finding => vEl('article', `finding finding-${finding.category}`,
+    vEl('div', 'finding-heading', vEl('h3', '', finding.title), vEl('span', 'subtle-code', finding.indicator_id ?? '')),
+    vEl('p', 'preserve', finding.description),
+    finding.step_refs.length ? vEl('p', 'finding-step', `错误位置：步骤 ${finding.step_refs.join('、')}`) : null,
+    vEvidenceLinks(finding.evidence_ids),
+    finding.indicator_id ? vButton('对应课程要求', () => vOpenCurriculum(finding.indicator_id), 'text-button feature-course-link') : null,
+    finding.material_ids.length || finding.point_refs.length ? vLazyDetails('finding-context', '材料与评分依据', () => vEl('p', '',
+      `材料 ${finding.material_ids.join('、') || '未匹配'}；评分点 ${finding.point_refs.join('、') || '未定位'}`), finding.finding_id) : null)
+  const observed = item.diagnosis.payload.findings.filter(finding => finding.finding_type === 'observed_performance')
+  const categories = [['fact', '需要关注的步骤'], ['inference', '待进一步确认'], ['insufficient_data', '需要补充的观察'], ['scoring_review', '先复核这些记录']]
+  for (const [category, title] of categories) {
+    const findings = item.diagnosis.payload.findings.filter(finding => finding.category === category && finding.finding_type !== 'observed_performance')
+    if (findings.length) vMain.append(vPanel(title, '', vEl('div', 'findings', findings.map(renderFinding))))
+  }
+  vMain.append(vPanel('学习内容覆盖', '',
     vTable([
-      { label: '学习主题', render: row => `${vWorkspace.curriculum.payload.topics.find(topic => topic.topic_id === row.topic_id)?.name ?? row.topic_id}` },
+      { label: '学习主题', render: row => vWorkspace.curriculum.payload.topics.find(topic => topic.topic_id === row.topic_id)?.name ?? row.topic_id },
       { label: '教学范围', render: row => row.taught ? '本节点已教' : '本节点未教' },
       { label: '有效记录', render: row => row.valid_record_count },
       { label: '得分率', render: row => vRate(row.score_rate) },
     ], stats.topics),
-    vEl('details', 'indicator-details', vEl('summary', '', '展开全部观察指标'), vTable([
+    vLazyDetails('indicator-details', '展开全部观察指标', () => vTable([
       { label: '指标', render: row => `${row.indicator_id} · ${vWorkspace.curriculum.payload.entries.find(entry => entry.indicator_id === row.indicator_id)?.indicator_description ?? ''}` },
       { label: '有效记录', render: row => row.valid_record_count }, { label: '得分率', render: row => vRate(row.score_rate) },
       { label: '依据', render: row => vEvidenceLinks(row.evidence_ids) },
-    ], stats.indicators))))
-  const categories = [['fact', '已观察事实', '可由评分、步骤或统计直接核对'], ['inference', '有限推断', '保留适用范围，供教师判断'], ['insufficient_data', '证据不足', '安排补充观察，暂不判断未掌握'], ['scoring_review', '评分待复核', '先核对记录，不形成薄弱点结论']]
-  for (const [category, title, description] of categories) {
-    const findings = item.diagnosis.payload.findings.filter(finding => finding.category === category)
-    vMain.append(vPanel(title, description, findings.length ? vEl('div', 'findings', findings.map(finding => vEl('article', `finding finding-${category}`,
-      vEl('div', 'finding-heading', vEl('h3', '', finding.title), vEl('span', 'subtle-code', finding.indicator_id ?? '')),
-      vEl('p', 'preserve', finding.description),
-      finding.step_refs.length ? vEl('p', 'muted', `步骤 ${finding.step_refs.join('、')} · 评分点 ${finding.point_refs.join('、') || '未定位'}`) : null,
-      finding.material_ids.length ? vEl('p', 'muted', `相关材料 ${finding.material_ids.join('、')}`) : null,
-      vEvidenceLinks(finding.evidence_ids)))) : vEmpty('当前没有这一类结论。')))
-  }
+    ], stats.indicators)),
+    observed.length ? vLazyDetails('indicator-details', '各指标的已有表现', () => vEl('div', 'findings', observed.map(renderFinding))) : null))
   vMain.append(vLimitations(item.diagnosis))
 }
 
@@ -298,13 +574,15 @@ function vPlan() {
   const item = vCase()
   if (!item) return vMain.append(vEmpty('当前没有可用计划。'))
   vCurrentExport = item.plan
-  vMain.append(vSelect('内容模式', [{ value: 'student', label: '学生提示' }, { value: 'teacher', label: '教师核对' }], vState.planMode ?? 'student', value => { vState.planMode = value; vRender() }).wrapper)
+  vMain.append(vEl('div', 'analysis-actions', vSegments('内容模式', [{ value: 'student', label: '学生提示' }, { value: 'teacher', label: '教师核对' }], vState.planMode ?? 'student', value => { vState.planMode = value; vRender() }),
+    vButton('查看诊断依据', () => vShow('diagnosis'))))
   const certaintyNames = { insufficient: '证据不足', provisional: '结论暂定', adequate: '证据较充分' }
-  vMain.append(vEl('div', 'plan-intro', vEl('div', '', vEl('p', 'eyebrow', '当前建议类型'), vEl('h2', '', vKindNames[item.plan.payload.plan_type]),
-    vEl('p', 'muted', `证据状态：${certaintyNames[item.plan.payload.certainty] ?? '证据不足'} · ${item.plan.payload.summary ?? '本地规则根据当前节点已有记录生成。'}`),
-    item.plan.payload.evidence_gaps?.length ? vEl('p', 'muted', `补充观察：${item.plan.payload.evidence_gaps.map(gap => gap.indicator_id).join('、')}`) : null),
+  vMain.append(vEl('div', 'plan-intro', vEl('div', '', vEl('h2', '', vKindNames[item.plan.payload.plan_type]),
+    vEl('p', 'muted', certaintyNames[item.plan.payload.certainty] ?? '证据不足')),
+    vEl('details', 'export-menu', vEl('summary', 'button button-secondary', '导出学生练习'), vEl('div', 'export-menu-content',
+    vButton('导出独立学生页', vDownloadStudentPage),
     vButton('导出学生练习清单', () => vDownload(vStudentPlan(item), `${vState.student}-${vState.node}-student-plan.json`), 'button button-primary'),
-    vButton('导出学生练习 CSV', () => vDownload(vStudentPlan(item), `${vState.student}-${vState.node}-student-plan.csv`))))
+    vCsvButton('导出学生练习 CSV', () => vStudentPlan(item), () => `${vState.student}-${vState.node}-student-plan.csv`)))))
   if (!item.plan.payload.activities.length) vMain.append(vEmpty('诊断未完成或缺少合适材料，暂未生成活动。请先查看处理说明。'))
   const firstIds = new Set(item.plan.payload.delivery?.first_activity_ids ?? item.plan.payload.activities.map(activity => activity.activity_id))
   const firstActivities = item.plan.payload.activities.filter(activity => firstIds.has(activity.activity_id))
@@ -351,15 +629,18 @@ function vPlan() {
       vEl('dt', '', '何时调整'), vEl('dd', '', activity.adjust_when))
     return vEl('section', 'panel activity', vEl('div', 'activity-heading', vEl('span', 'activity-number', String(activity.order).padStart(2, '0')),
       vEl('div', '', vEl('span', 'eyebrow', vKindNames[activity.kind]), vEl('h2', '', activity.goal))),
-      vEl('p', 'preserve', activity.rationale), activity.selection_reason ? vEl('p', 'selection-reason', vSelectionNames[activity.selection_reason] ?? '依据当前学习需求选择') : null,
       vEl('p', 'activity-prompt', activity.prompt), questions,
-      vEl('p', 'muted', `学习材料 ${activity.material_ids.join('、') || '暂未匹配'} · 指标 ${activity.indicator_id}`), detail, vEvidenceLinks(activity.evidence_ids))
+      vEl('p', 'activity-success', `完成标准：${(activity.success_criteria ?? []).join('；')}`),
+      vButton('查看课程要求', () => vOpenCurriculum(activity.indicator_id), 'text-button feature-course-link'),
+      vLazyDetails('activity-more', '安排依据与调整条件', () => [vEl('p', 'preserve', activity.rationale),
+        activity.selection_reason ? vEl('p', '', vSelectionNames[activity.selection_reason] ?? activity.selection_reason) : null,
+        vEl('p', '', `材料 ${activity.material_ids.join('、') || '暂未匹配'} · ${activity.indicator_id}`), detail, vEvidenceLinks(activity.evidence_ids)], activity.activity_id))
   }
-  if (item.plan.payload.delivery && item.plan.payload.activities.length) vMain.append(vEl('p', 'notice', `本轮先完成 ${firstActivities.length} 项活动。${item.plan.payload.delivery.advance_when}`))
+  if (item.plan.payload.delivery && item.plan.payload.activities.length) vMain.append(vEl('p', 'plan-batch', `本轮 ${firstActivities.length} 项活动`))
   vMain.append(...firstActivities.map(renderActivity))
   if (laterActivities.length) {
-    vMain.append(vEl('details', 'plan-followup', vEl('summary', '', `后续学习活动（${laterActivities.length} 项）`),
-      vEl('p', 'muted', '保留完整后续安排，完成本轮观察后再由教师决定进入下一阶段。'), laterActivities.map(renderActivity)))
+    vMain.append(vLazyDetails('plan-followup', `后续学习活动（${laterActivities.length} 项）`, () => [
+      vEl('p', 'muted', item.plan.payload.delivery.advance_when), laterActivities.map(renderActivity)]))
   }
   vMain.append(vLimitations(item.plan))
 }
@@ -374,9 +655,11 @@ function vNodePairing(controls) {
     return
   }
   if (!otherNodes.some(node => node.node_id === vState.pairingRightNode)) vState.pairingRightNode = otherNodes[0].node_id
-  controls.append(vSelect('另一测验节点', otherNodes.map(node => ({ value: node.node_id, label: `${node.node_id} · ${node.date}` })), vState.pairingRightNode, value => { vState.pairingRightNode = value; vRender() }).wrapper)
+  controls.append(vSelect('另一测验节点', otherNodes.map(node => ({ value: node.node_id, label: [node.node_id, node.date].filter(Boolean).join(' · ') })), vState.pairingRightNode, value => { vState.pairingRightNode = value; vRender() }).wrapper)
   const subject = vState.pairingType === 'class' ? { class_id: vState.selectedClass } : { student_id: vState.student }
-  const result = inspect_node_pairing(vSnapshot, { ...subject, left_node_id: vState.node, right_node_id: vState.pairingRightNode })
+  const scope = { ...subject, left_node_id: vState.node, right_node_id: vState.pairingRightNode }
+  const pairingKey = [vState.pairingType === 'class' ? 'class' : 'student', Object.values(subject)[0], vState.node, vState.pairingRightNode].map(encodeURIComponent).join(':')
+  const result = vWorkspace.node_pairings[pairingKey] ?? vCachedComparison('nodes', scope, () => inspect_node_pairing(vSnapshot, scope))
   vCurrentExport = result
   const payload = result.payload
   const reasons = {
@@ -389,8 +672,8 @@ function vNodePairing(controls) {
   const sideCell = side => vEl('div', '', `${side.valid_student_ids.length} 人 · ${side.valid_record_count} 条有效 / ${side.record_count} 条记录`,
     side.reason_codes.map(code => vEl('p', 'muted', reasons[code] ?? code)),
     vEvidenceLinks([...new Set([...side.evidence_ids, ...side.quality_record_ids])]))
-  vMain.append(vPanel('跨节点观察配对', `${payload.subject_id} · ${payload.left_node_id} 与 ${payload.right_node_id}。选择同一对象，逐题核对两个节点的观察范围。`, controls),
-    vEl('p', 'notice', '可配对表示存在同题、同一学生的有效作答。教学范围和作答条件不同，不能直接据此判断学习进步；本页不计算跨节点分数差。'),
+  vMain.append(controls,
+    vEl('p', 'comparison-explain', '同题、同一学生两侧均有有效记录才可配对；不计算跨节点分数差'),
     vMetrics([
       { label: '两节点共同题目', value: payload.shared_allowed_item_ids.length, detail: `题目并集 ${payload.candidate_item_ids.length} 道` },
       { label: '有配对观察的题目', value: payload.paired_item_ids.length, detail: '逐题要求同一学生两侧均有有效记录' },
@@ -410,21 +693,22 @@ function vNodePairing(controls) {
 
 function vComparison() {
   const controls = vEl('div', 'comparison-controls')
-  controls.append(vSelect('比较方式', [{ value: 'peers', label: '个人与同伴' }, { value: 'students', label: '两名学生' }, { value: 'classes', label: '两个班级' }, { value: 'nodes', label: '跨节点观察配对' }], vState.comparisonMode, value => { vState.comparisonMode = value; vRender() }).wrapper)
+  controls.append(vSegments('比较方式', [{ value: 'peers', label: '个人与同伴' }, { value: 'students', label: '两名学生' }, { value: 'classes', label: '两个班级' }, { value: 'nodes', label: '跨节点观察配对' }], vState.comparisonMode, value => { vState.comparisonMode = value; vRender() }))
   if (vState.comparisonMode === 'nodes') { vNodePairing(controls); return }
   let result
   if (vState.comparisonMode === 'peers') {
-    result = compare_with_peers(vSnapshot, { student_id: vState.student, node_id: vState.node })
-    controls.append(vEl('p', 'muted comparison-explain', '以顶部选中的学生为左侧，右侧同班同伴先排除本人。'))
+    result = vCase().peers
   } else if (vState.comparisonMode === 'students') {
     controls.append(vSelect('右侧学生', vStudents.map(student => ({ value: student.student_id, label: `${student.student_id} · ${student.class_id}` })), vState.secondStudent, value => { vState.secondStudent = value; vRender() }).wrapper)
-    result = compare_students(vSnapshot, { left_student_id: vState.student, right_student_id: vState.secondStudent, node_id: vState.node })
+    const scope = { left_student_id: vState.student, right_student_id: vState.secondStudent, node_id: vState.node }
+    result = vCachedComparison('students', scope, () => compare_students(vSnapshot, scope))
   } else {
     for (const [key, label] of [['leftClass', '左侧班级'], ['rightClass', '右侧班级']]) controls.append(vSelect(label, vWorkspace.classes.map(id => ({ value: id, label: id })), vState[key], value => { vState[key] = value; vRender() }).wrapper)
-    result = compare_classes(vSnapshot, { left_class_id: vState.leftClass, right_class_id: vState.rightClass, node_id: vState.node })
+    const scope = { left_class_id: vState.leftClass, right_class_id: vState.rightClass, node_id: vState.node }
+    result = vCachedComparison('classes', scope, () => compare_classes(vSnapshot, scope))
   }
   vCurrentExport = result
-  vMain.append(vPanel('在相同题目上比较', '仅使用同一测验节点的共同有效题，双方按相同满分权重计算。', controls))
+  vMain.append(controls)
   const payload = result.payload
   vMain.append(vMetrics([
     { label: `左侧 · ${payload.left_label}`, value: vRate(payload.left_rate), detail: '共同题集加权得分率' },
@@ -459,30 +743,35 @@ function vClasses() {
     { label: '有效作答记录', value: payload.valid_record_count, detail: `${payload.review_count} 条待复核` },
     { label: '有效题目覆盖', value: vRate(payload.coverage.item_coverage_rate), detail: `${payload.coverage.valid_item_count} / ${payload.coverage.available_item_count} 道节点允许题` },
   ]))
-  vMain.append(vPanel('班级学习内容覆盖', '未教学与未观察保持分开。', vTable([
+  const plan = vWorkspace.class_plans[vScopeKey(vState.selectedClass, vState.node)]
+  if (plan) {
+    const recommendationsPanel = vPanel('班级教学建议', '',
+      vEl('details', 'export-menu class-plan-export', vEl('summary', 'button button-secondary', '导出教学建议'), vEl('div', '',
+        vButton('导出班级教学建议', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.json`)),
+        vCsvButton('导出班级建议 CSV', () => plan, () => `${vState.selectedClass}-${vState.node}-teaching-plan.csv`))),
+      plan.payload.recommendations.map((recommendation, index) => vLazyDetails('class-recommendation',
+      [vEl('span', '', recommendation.goal), vEl('span', 'muted', `${recommendation.student_ids.length} 人`)], () => [
+      vEl('p', '', `适用学生：${recommendation.student_ids.join('、')}`),
+      vEl('p', '', recommendation.rationale), vEl('ol', '', recommendation.steps.map(step => vEl('li', '', step))),
+      vEl('p', 'muted', `可选题目：${recommendation.item_ids.join('、')} · 材料：${recommendation.material_ids.join('、') || '未提供'}`),
+      vEl('p', '', `观察：${recommendation.observation}`), vEl('p', '', `调整条件：${recommendation.adjust_when}`),
+      vEvidenceLinks(recommendation.evidence_ids)], `recommendation:${index}`)), vLimitations(plan))
+    recommendationsPanel.querySelector('.section-heading').append(recommendationsPanel.querySelector('.class-plan-export'))
+    vMain.append(recommendationsPanel)
+  }
+  vMain.append(vPanel('班级学习内容覆盖', '', vTable([
     { label: '主题', render: row => vWorkspace.curriculum.payload.topics.find(topic => topic.topic_id === row.topic_id)?.name ?? row.topic_id },
     { label: '范围', render: row => row.taught ? '本节点已教' : '本节点未教' },
     { label: '有记录人数', render: row => row.observed_student_count },
     { label: '有效记录', render: row => row.valid_record_count },
     { label: '得分率', render: row => vRate(row.score_rate) },
   ], payload.topics)))
-  vMain.append(vPanel('逐题与评分点分布', '按有效作答事件计数，另列不同学生人数；缺记录不记零分。', payload.items.map(item => vEl('details', 'material-details',
-    vEl('summary', '', `${item.item_id} · ${item.scored_student_count} 人 / ${item.valid_record_count} 条有效记录 · ${vRate(item.score_rate)}`),
+  vMain.append(vPanel('逐题与评分点分布', '按有效作答事件计数，另列不同学生人数；缺记录不记零分。', payload.items.map(item => vLazyDetails('material-details', `${item.item_id} · ${item.scored_student_count} 人 / ${item.valid_record_count} 条有效记录 · ${vRate(item.score_rate)}`, () => [
     vEl('p', 'muted', `得分分布：${item.score_distribution.map(value => `${value.score}分 ${value.record_count}条`).join('；') || '暂无已评分样本'}`),
     vTable([{ label: '评分点', render: point => point.point_id }, { label: '有效人数', render: point => point.scored_student_count },
       { label: '得分率', render: point => vRate(point.score_rate) },
       { label: '分布（事件数）', render: point => point.score_distribution.map(value => `${value.score}分 ${value.record_count}条`).join('；') || '暂无样本' },
-      { label: '依据', render: point => vEvidenceLinks(point.evidence_ids) }], item.scoring_points)))))
-  const plan = vWorkspace.class_plans[vScopeKey(vState.selectedClass, vState.node)]
-  if (plan) {
-    vMain.append(vPanel('班级教学建议', '按指标与已有证据分组，不作全班能力排名。', plan.payload.recommendations.map(recommendation => vEl('section', 'question',
-      vEl('h3', '', recommendation.goal), vEl('p', '', `适用学生：${recommendation.student_ids.join('、')}`),
-      vEl('p', '', recommendation.rationale), vEl('ol', '', recommendation.steps.map(step => vEl('li', '', step))),
-      vEl('p', 'muted', `可选题目：${recommendation.item_ids.join('、')} · 材料：${recommendation.material_ids.join('、') || '未提供'}`),
-      vEl('p', '', `观察：${recommendation.observation}`), vEl('p', '', `调整条件：${recommendation.adjust_when}`),
-      vEvidenceLinks(recommendation.evidence_ids)))))
-    vMain.append(vButton('导出班级教学建议', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.json`)), vButton('导出班级建议 CSV', () => vDownload(plan, `${vState.selectedClass}-${vState.node}-teaching-plan.csv`)), vLimitations(plan))
-  }
+      { label: '依据', render: point => vEvidenceLinks(point.evidence_ids) }], item.scoring_points)], item.item_id))))
   vMain.append(vPanel('学生记录概况', '点击学生查看其诊断，空记录保持未知。', vTable([
     { label: '学生', render: row => vButton(row.student_id, () => vShow('diagnosis', row.student_id), 'text-button') },
     { label: '有效 / 已有记录', render: row => `${row.valid_record_count} / ${row.record_count}` },
@@ -495,12 +784,20 @@ function vClasses() {
 function vCurriculum() {
   const curriculum = vWorkspace.curriculum
   vCurrentExport = curriculum
-  vMain.append(vEl('p', 'notice', '课程页码来自输入索引。这里展示材料定位，不声称已经逐页核验 PDF 内容。'))
+  if (vState.curriculumFocus) vMain.append(vEl('div', 'curriculum-context',
+    vButton(`返回${vState.curriculumReturn === 'overview' ? '工作台' : vNames[vState.curriculumReturn]}`, () => vShow(vState.curriculumReturn)),
+    vEl('span', '', `定位指标：${vState.curriculumFocus}`)))
+  vMain.append(vEl('p', 'comparison-explain', '页码来自材料索引，可据此定位原文件'))
   for (const topic of curriculum.payload.topics) {
     const entries = curriculum.payload.entries.filter(entry => entry.topic_id === topic.topic_id)
     vMain.append(vPanel(`${topic.topic_id} · ${topic.name}`, topic.objective,
       vTable([
-        { label: '观察指标', render: row => vEl('div', '', vEl('strong', '', row.indicator_id), vEl('p', '', row.indicator_description)) },
+        { label: '观察指标', render: row => {
+          const cell = vEl('div', '', vEl('strong', '', row.indicator_id), vEl('p', '', row.indicator_description))
+          cell.dataset.indicator = row.indicator_id
+          cell.tabIndex = -1
+          return cell
+        } },
         { label: '课程标准定位', render: row => vEl('div', '', row.course_standard.file, vEl('p', 'muted', `文件第 ${row.course_standard.file_page ?? '未提供'} 页 / 正文第 ${row.course_standard.printed_page ?? '未提供'} 页`), vEl('span', 'index-label', '输入索引')) },
         { label: '教材与材料', render: row => vEl('div', '', row.textbook_pages ?? '页段未提供', vEl('p', 'muted', row.material_ids.join('、') || '未匹配')) },
         { label: '关联题目', render: row => row.question_ids.join('、') || '未匹配' },
@@ -511,6 +808,10 @@ function vCurriculum() {
   }
   if (curriculum.payload.links.length) vMain.append(vPanel('内容之间的必要联系', '以下为教学组织建议，先后顺序可由教师结合任务调整。', curriculum.payload.links.map(link => vEl('p', '', `${link.from_topic_id} → ${link.to_topic_id}：${link.basis}`))))
   vMain.append(vLimitations(curriculum))
+  if (vState.curriculumFocus) {
+    const target = [...vMain.querySelectorAll('[data-indicator]')].find(element => element.dataset.indicator === vState.curriculumFocus)
+    target?.closest('tr').classList.add('curriculum-focus-row')
+  }
 }
 
 function vQuality() {
@@ -519,7 +820,6 @@ function vQuality() {
     { label: '修订事件', value: vWorkspace.summary.revised_event_count, detail: '最高版本异常时不会回退旧版' },
     { label: '正常未评分排除', value: vWorkspace.summary.excluded_count, detail: '未评分不是错误作答' },
   ]))
-  vMain.append(vEl('p', 'notice', '上方计数为完整快照。下方可筛选当前学生与节点，或按记录、题目和问题原因查找；筛选不改变评分。'))
   const list = vEl('div', 'quality-results')
   const count = vEl('p', 'quality-result-count')
   count.setAttribute('role', 'status')
@@ -541,9 +841,15 @@ function vQuality() {
     count.textContent = `显示 ${records.length} / ${vWorkspace.quality_records.length} 条质量问题记录 · ${vState.qualityScope === 'current' ? `${vState.student} / ${vState.node}` : '整个数据快照'}${vState.qualitySearch.trim() ? ` · 查找“${vState.qualitySearch.trim()}”` : ''}`
     list.replaceChildren()
     for (const record of records) {
-    const details = vEl('details', 'quality-record', vEl('summary', '', vEl('strong', '', record.record_id), vEl('span', '', `${record.student_id} · ${record.item_id} · ${record.node_id}`), vBadge(record.action === 'review' ? 'needs_review' : 'ok')),
-      vEl('ul', 'quality-reasons', record.quality_issues.map(issue => vEl('li', '', issue.message))), vEvidenceBody(record))
+      const details = vLazyDetails('quality-record', [vEl('strong', '', record.record_id), vEl('span', '', `${record.student_id} · ${record.item_id} · ${record.node_id}`), vBadge(record.action === 'review' ? 'needs_review' : 'ok')],
+        () => [vEl('ul', 'quality-reasons', record.quality_issues.map(issue => vEl('li', '', issue.message))), vEvidenceBody(record)], record.record_id)
       list.append(details)
+    }
+    const notes = vMain.querySelector('.teacher-notes')
+    if (notes) {
+      if (notes.open) vExpanded.add(notes.dataset.disclosureKey)
+      else vExpanded.delete(notes.dataset.disclosureKey)
+      notes.replaceWith(vNotes())
     }
     if (!records.length) list.append(vEmpty(vWorkspace.quality_records.length ? '没有匹配记录，请调整筛选条件。' : '当前快照未检测到待复核记录；这不替代数学过程的人工核验。'))
   }
@@ -554,70 +860,156 @@ function vQuality() {
   renderResults()
 }
 
+function vNoteKey() {
+  if (vState.view === 'classes') return `classes:${vScopeKey(vState.selectedClass, vState.node)}`
+  if (vState.view === 'comparison') return `comparison:${JSON.stringify([vState.comparisonMode, vCurrentExport?.scope])}`
+  if (vState.view === 'curriculum') return `curriculum:${vState.node}`
+  if (vState.view === 'quality') return `quality:${vState.qualityScope}:${vState.qualityScope === 'current' ? vScopeKey(vState.student, vState.node) : 'all'}`
+  return `${vState.view}:${vScopeKey(vState.student, vState.node)}`
+}
+
 function vNotes() {
-  const key = `${vState.view}:${vScopeKey(vState.student, vState.node)}`
+  const key = vNoteKey()
   const textarea = vEl('textarea', 'notes-input')
   textarea.rows = 3
-  textarea.placeholder = '记录需要复核的依据、讲解调整或下一次观察；不会修改已有统计和诊断。'
+  textarea.placeholder = '记录复核意见或下一次教学安排'
   textarea.setAttribute('aria-label', '本地教师备注')
   textarea.value = vState.notes[key] ?? ''
   textarea.addEventListener('input', () => { vState.notes[key] = textarea.value })
-  return vEl('section', 'teacher-notes', vEl('div', 'notes-heading', vEl('h2', '', '教师备注'),
+  const details = vEl('details', 'teacher-notes', vEl('summary', '', '教师备注'),
+    vEl('div', 'notes-heading', vEl('p', 'muted', '备注仅留在本次浏览器会话，关闭前请导出'),
     vButton('导出备注', () => vDownload({ generated_at: WORKSPACE.generated_at, dataset_version: WORKSPACE.dataset_version, policy_version: WORKSPACE.policy_version,
-      kind: 'teacher_notes', changes_facts: false, notes: vState.notes }, 'teacher-notes.json'))),
-    vEl('p', 'muted', '仅保留在当前浏览器会话，关闭页面前请导出。备注与分析事实分开保存。'), textarea)
+      kind: 'teacher_notes', changes_facts: false, notes: vState.notes }, 'teacher-notes.json'))), textarea)
+  details.dataset.disclosureKey = `notes:${key}`
+  details.open = vExpanded.has(details.dataset.disclosureKey)
+  return details
 }
 
-function vRender() {
-  vPageTitle.textContent = vNames[vState.view]
-  vNodeDescription.textContent = `${vState.student} · ${vState.node}　${vNodes.find(node => node.node_id === vState.node)?.description ?? ''}`
+function vReportInfo() {
+  const trigger = document.activeElement?.closest('.export-menu')?.querySelector('summary') ?? document.activeElement
+  for (const menu of document.querySelectorAll('.export-menu[open]')) menu.open = false
+  const dialog = vEl('dialog', 'report-info')
+  dialog.setAttribute('aria-label', '报告信息')
+  dialog.append(vEl('div', 'dialog-heading', vEl('h2', '', '报告信息'), vButton('关闭', () => dialog.close())),
+    vEl('div', 'report-info-body', vEl('dl', 'evidence-meta',
+      vEl('dt', '', '分析时间（UTC）'), vEl('dd', '', WORKSPACE.generated_at),
+      vEl('dt', '', '数据版本'), vEl('dd', '', WORKSPACE.dataset_version),
+      vEl('dt', '', '规则版本'), vEl('dd', '', WORKSPACE.policy_version)),
+      vEl('p', '', WORKSPACE.source_mode === 'fixture' ? '合成演示数据，仅用于开发演示，不能代替正式数据验收。' : '赛事模拟数据，由本地规则分析；模拟结果不能证明真实教学成效。'),
+      vEl('p', '', '本页是教师报告，包含原始作答与参考答案。给学生分发时，请使用“导出独立学生页”，只发送对应学生的单个文件。'),
+      vLimitations(WORKSPACE)))
+  dialog.addEventListener('close', () => { dialog.remove(); trigger?.focus({ preventScroll: true }) }, { once: true })
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close() })
+  document.body.append(dialog)
+  dialog.showModal()
+}
+
+function vExportName(format) {
+  const scope = vCurrentExport?.scope ?? {}
+  const parts = Object.values(scope).filter(value => ['string', 'number'].includes(typeof value)).map(value => String(value).replace(/[^\p{L}\p{N}._-]/gu, '_'))
+  return `${[vState.view, ...parts].join('-')}.${format}`
+}
+
+function vRender({ navigate = false } = {}) {
+  const active = document.activeElement
+  const focus = vMain.contains(active) ? { label: active.getAttribute('aria-label'), control: active.dataset.control } : null
+  for (const details of vMain.querySelectorAll('details[data-disclosure-key]')) {
+    if (details.open) vExpanded.add(details.dataset.disclosureKey)
+    else vExpanded.delete(details.dataset.disclosureKey)
+  }
+  vPageTitle.textContent = vState.view === 'overview' ? '教师工作台' : vNames[vState.view]
+  vNodeDescription.textContent = `${vState.student} · ${vState.node}`
+  vStudentControls.hidden = !['overview', 'diagnosis', 'plan', 'comparison', 'quality'].includes(vState.view) || (vState.view === 'comparison' && vState.comparisonMode === 'classes')
   for (const [key, button] of vNavigation) {
     button.classList.toggle('active', key === vState.view)
     if (key === vState.view) button.setAttribute('aria-current', 'page')
     else button.removeAttribute('aria-current')
   }
-  vMain.replaceChildren()
-  const render = { overview: vOverview, diagnosis: vDiagnosis, plan: vPlan, comparison: vComparison, classes: vClasses, curriculum: vCurriculum, quality: vQuality }[vState.view]
-  if (!vStudents.length || !vNodes.length) vMain.append(vEmpty('当前快照没有学生或测验节点，请重新导入有效数据。'))
-  else render()
-  for (const button of vExportButtons) button.disabled = !vCurrentExport
-  vMain.append(vNotes())
+  const main = vMain
+  vMain = document.createDocumentFragment()
+  vCurrentExport = null
+  try {
+    const render = { overview: vOverview, diagnosis: vDiagnosis, plan: vPlan, comparison: vComparison, classes: vClasses, curriculum: vCurriculum, quality: vQuality }[vState.view]
+    if (!vStudents.length || !vNodes.length) vMain.append(vEmpty('当前快照没有学生或测验节点，请重新导入有效数据。'))
+    else render()
+    vMain.append(vNotes())
+    main.replaceChildren(vMain)
+  } finally { vMain = main }
+  vUpdateExportButtons()
+  if (navigate) {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    vPageTitle.focus({ preventScroll: true })
+  } else if (focus) {
+    const target = [...vMain.querySelectorAll('[aria-label], [data-control]')].find(element =>
+      focus.control ? element.dataset.control === focus.control : focus.label && element.getAttribute('aria-label') === focus.label)
+    target?.focus({ preventScroll: true })
+  }
 }
 
 function vStart() {
   const app = document.getElementById('app')
   const nav = vEl('nav', 'navigation')
   nav.setAttribute('aria-label', '报告页面')
-  const navMarks = ['总', '诊', '学', '比', '班', '课', '核']
-  Object.entries(vNames).forEach(([key, label], index) => {
-    const button = vButton('', () => vShow(key), 'nav-button')
-    button.append(vEl('span', 'nav-mark', navMarks[index]), vEl('span', '', label))
+  Object.entries(vNames).forEach(([key, label]) => {
+    const button = vButton(label, () => {
+      if (key === 'curriculum') {
+        vState.curriculumFocus = null
+        vState.curriculumReturn = null
+        if (vState.view === 'curriculum') { vRender({ navigate: true }); return }
+      }
+      vShow(key)
+    }, 'nav-button')
     nav.append(button)
     vNavigation.set(key, button)
   })
-  const version = vEl('code', 'version-code', WORKSPACE.dataset_version.replace('sha256:', '').slice(0, 12))
-  version.title = WORKSPACE.dataset_version
-  const sidebar = vEl('aside', 'sidebar', vEl('div', 'brand', vEl('span', 'brand-mark', '学'), vEl('div', '', vEl('strong', '', '智慧学伴'), vEl('span', 'brand-subtitle', '学习有依据'))),
-    nav, vEl('div', 'sidebar-footer', vEl('span', 'local-dot', '本地规则分析'), vEl('p', '', '同一快照 · 可追溯依据'), version))
+  const sidebar = vEl('aside', 'sidebar', vEl('div', 'brand', vEl('strong', '', '智慧学伴')), nav,
+    vEl('div', 'sidebar-footer', vButton('报告信息', vReportInfo, 'text-button')))
   const studentField = vSelect('模拟学生', vStudents.map(student => ({ value: student.student_id, label: `${student.student_id} · ${student.class_id}` })), vState.student, value => { vState.student = value; vClearStudentSearch(); vRender() })
-  const nodeField = vSelect('测验节点', vNodes.map(node => ({ value: node.node_id, label: `${node.node_id} · ${node.date}` })), vState.node, value => { vState.node = value; vRender() })
+  const nodeField = vSelect('测验节点', vNodes.map(node => ({ value: node.node_id, label: [node.node_id, node.date].filter(Boolean).join(' · ') })), vState.node, value => { vState.node = value; vRender() })
+  vStudentControls = studentField.wrapper
   vStudentSelect = studentField.select
   vNodeSelect = nodeField.select
-  vNodeSelect.setAttribute('aria-label', '测验节点')
   vPageTitle = vEl('h1', '', '总览')
-  vNodeDescription = vEl('p', 'node-description')
-  for (const format of ['csv', 'json']) vExportButtons.push(vButton(`导出当前 ${format.toUpperCase()}`, () => vDownload(vCurrentExport, `${vState.view}-${vState.student}-${vState.node}.${format}`), format === 'json' ? 'button button-primary' : 'button'))
-  const toolbar = vEl('header', 'topbar', vEl('div', 'title-block', vEl('p', 'eyebrow', '教师工作台 · 本地报告'), vPageTitle),
-    vEl('div', 'toolbar-controls', vStudentLookup(), studentField.wrapper, nodeField.wrapper,
-      vButton('打印当前页', () => window.print()), ...vExportButtons))
+  vPageTitle.tabIndex = -1
+  vNodeDescription = vEl('span', 'node-description sr-only')
+  for (const format of ['csv', 'json']) {
+    const button = vButton(`导出当前 ${format.toUpperCase()}`, () => vDownload(vCurrentExport, vExportName(format)))
+    button.dataset.exportFormat = format
+    vExportButtons.push(button)
+  }
+  vExportMenu = vEl('details', 'export-menu', vEl('summary', 'button button-primary', '导出'),
+    vEl('div', 'export-menu-content', ...vExportButtons, vButton('打印当前页', () => { vExportMenu.open = false; window.print() }), vButton('报告信息', vReportInfo)))
+  const notesButton = vButton('备注', () => {
+    const notes = vMain.querySelector('.teacher-notes')
+    notes.open = true
+    notes.scrollIntoView({ block: 'center', behavior: 'auto' })
+    notes.querySelector('textarea').focus({ preventScroll: true })
+  })
+  vExportStatusText = vEl('span', 'export-status-text')
+  vExportRetry = vButton('重试 CSV', () => {}, 'text-button export-retry')
+  vExportRetry.hidden = true
+  vExportStatus = vEl('div', 'export-status', vExportStatusText, vExportRetry)
+  vExportStatus.setAttribute('role', 'status')
+  vExportStatus.setAttribute('aria-live', 'polite')
+  vExportStatus.hidden = true
+  const toolbar = vEl('header', 'workspace-header', vEl('div', 'title-block', vPageTitle), vEl('div', 'page-actions', vExportStatus, notesButton, vExportMenu))
   vMain = vEl('main', 'main-content')
-  const fixture = WORKSPACE.source_mode === 'fixture'
-  const source = vEl('div', `data-source-banner ${fixture ? 'source-fixture' : 'source-live'}`,
-    vEl('strong', '', fixture ? '合成演示数据' : '赛事模拟数据'),
-    vEl('span', '', fixture ? '仅用于开发演示，不能代替正式数据验收。' : '本地分析结果；复核记录保留处理说明，不能据此证明真实教学成效。'))
+  const source = vEl('span', `data-source-label ${WORKSPACE.source_mode === 'fixture' ? 'source-fixture' : 'source-live'}`, WORKSPACE.source_mode === 'fixture' ? '合成演示数据' : '赛事模拟数据')
   source.setAttribute('aria-label', '数据来源')
-  app.replaceChildren(vEl('div', 'app-shell', sidebar, vEl('div', 'workspace', toolbar, source, vEl('div', 'context-strip', vNodeDescription, vEl('span', 'source-label', '本地教师视图')), vMain)))
+  vToast = vEl('div', 'feedback-toast')
+  vToast.hidden = true
+  vToast.setAttribute('role', 'status')
+  app.replaceChildren(vEl('div', 'app-shell', sidebar, vEl('div', 'workspace', toolbar,
+    vEl('div', 'context-toolbar', studentField.wrapper, nodeField.wrapper, source, vStudentLookup(), vNodeDescription), vMain)), vToast)
+  document.addEventListener('click', event => {
+    const inside = event.target.closest?.('.export-menu')
+    for (const menu of document.querySelectorAll('.export-menu[open]')) if (menu !== inside) menu.open = false
+  })
   document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      const menu = document.querySelector('.export-menu[open]')
+      if (menu) { menu.open = false; menu.querySelector('summary').focus() }
+    }
     if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.closest?.('input,textarea,select,[contenteditable="true"]')) {
       event.preventDefault()
       vStudentSearch.focus()
