@@ -164,3 +164,32 @@
 - 维护附项：历史 validatePlan 现在先把验证上下文归并为最高修订，不再把合法历史版本误报为额外证据；历史 data-quality 解析器对尾随字符、重复点和畸形片段改为无效复核。
 - 验证结果：Python 491通过；应用验收定向测试7通过；独立JS 19通过。新增负控覆盖学生提示篡改、可信答案缺失、重复评分点、畸形评分点、空rubric未知评分点、历史修订验证和尾随非评分文本。
 - 本轮只修改业务代码和合成测试，不写入真实赛题输入；修复后仍需重新推送、运行远端Study companion并交非作者复验。
+
+## 2026-11-15 正式入口代码复验通过
+
+复验冻结本分支 `88c0977046`，检查 `3f18c540a8` 的实际修改。本轮正式入口代码复验通过：QA-02、QA-03、QA-04均已关闭，原XA-101至XA-113及QA-01的既有场景未发现回退。结论限于本轮检查的统一流水线、正式兼容入口及列明的合成/原包回归，不等同于任意输入正确性、真人教学审核或正式参赛交付全部完成。本轮未修改业务源码、测试或依赖。
+
+### 本轮关闭项
+
+| 编号 | 位置与本轮实际验证 | 状态 |
+|---|---|---|
+| QA-02 | `modules/app/verify.ts:109-113`改用教师核对结果的参考答案；正常工作区通过，分别篡改第1、2、3级提示为自编答案均拒绝，答案为空、空白或缺字段均明确失败。`modules/app/core.ts:99`继续保持browser_snapshot无参考答案、解析和评分点。 | 已关闭 |
+| QA-03 | `competition/src/study_companion/load.py:143-160/264/277`完整解析并传递point_scores_invalid；冲突重复点、重复同值点、尾随非评分片段、1oops、NaN均拒绝计分，原始点串仍保留。 | 已关闭 |
+| QA-04 | `competition/src/study_companion/clean.py:227-237`接收解析异常并校验作答点与题库细则；空rubric与未知点组合已隔离，有完整细则的合法输入仍通过。 | 已关闭 |
+
+数据专项独立运行16套合成CSV、TS/Python两种实现共32次真实API求值；原6项数据回归保持正确，合法2/3及负数最终答案配正分均正常。constructor、toString、__proto__、hasOwnProperty、valueOf五种自编指标在个人计划、三级提示、班级计划和完整工作区均通过。旧正式入口的范围校验、改分、提示、CI脚本调用和导出完整性保护未发现回退；移走manifest的负控仍失败，恢复后通过。本轮未执行整条verify.sh，不将检查器证据扩大成整条shell脚本已通过。
+
+### 运行证据
+
+- 设置本地输入和已有Python对拍基线后执行 `npm run study:test`：业务构建、严格类型检查通过；数据40项、其他业务117项、独立JS19项，共176项通过，0失败、0跳过。
+- 默认Windows环境使用 `D:/Anaconda/python.exe -m pytest tests/ -q`：491项通过，未额外启用UTF-8模式。资料安全门禁及原编码失败均未复现。
+- 当前构建后的CLI从同一本地输入导出 `tmp/study-data/reports/acceptance-round5-20261115`，`check_export`返回export_complete=true；manifest、JSON/CSV、各对象结果和HTML摘要完整。报告保留数据本身的needs_review与真人复验pending状态，不将程序运行成功解释为已确认学生能力。
+- 参考实现与随机性质测试的修改已定向核对：补充题库评分细则和权威满分规则，未删除或放松既有断言；独立参考实现仍从原始CSV计算，不调用被测clean。
+- 独立合成复验脚本和产物留于被忽略的 `tmp/team-review/round5-20261115`，不提交赛事输入或派生报告。本轮文档检查仅检查变更范围、源码位置、链接、状态表与空白；远程Actions未观察到该冻结head对应运行，不记为远端CI已通过；未重新执行实际浏览器视觉或指定队员真人验收。
+
+### 非阻断历史接口维护备注
+
+历史JS的修订上下文不一致问题已修复，同一v1/v2上下文生成最新计划后验证正常。评分片段审计helper也已识别尾随文本、重复和畸形内容，但 `competitions/smart-learning-companion/wang-zhenyu/src/recommendation-engine.mjs:154`仍只读取parsePointScoreEntries返回的条目数组，丢失invalid标记；相同异常证据在该历史API中仍可能进入计划并被validatePlan接受。README已明确正式兼容入口不调用此旧引擎，因此不作为本轮正式路径阻断，不把“helper已修”扩大为历史调用链完全修复。
+
+- [ ] 若继续维护历史建议API，传递并检查评分片段invalid标记，补同一异常从auditRecord到buildLearningPlan和validatePlan的端到端负控；或明确停用该历史接口。
+- [ ] 正式入口可进入后续联调与交付准备；远端CI、指定队员真人复验、教学审核及方案PDF/演示视频/答辩PPT继续按团队清单完成。本轮通过只关闭当前代码复验项。
