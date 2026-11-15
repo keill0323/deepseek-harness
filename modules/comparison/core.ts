@@ -82,6 +82,15 @@ export interface ClassAnalysisPayload extends ScoreSummary {
   coverage: { available_item_count: number; observed_item_count: number; valid_item_count: number; item_coverage_rate: number | null }
   student_summaries: Array<ScoreSummary & { student_id: string; review_count: number }>
   quality_record_ids: string[]
+  items: Array<ScoreSummary & {
+    item_id: string
+    indicator_id: string
+    observed_student_count: number
+    scored_student_count: number
+    score_distribution: Array<{ score: number; record_count: number }>
+    scoring_points: Array<ScoreSummary & { point_id: string; max_score: number; scored_student_count: number; score_distribution: Array<{ score: number; record_count: number }> }>
+  }>
+  needs_observation: Array<{ student_id: string; indicator_ids: string[] }>
 }
 
 const LIMITATIONS = [
@@ -257,7 +266,7 @@ function emptyClass(scope: ClassScope): ClassAnalysisPayload {
     ...summarize([]), ...scope, student_count: 0, observed_student_count: 0, scored_student_count: 0,
     review_count: 0, excluded_count: 0, grading_status_counts: {}, topics: [], indicators: [],
     coverage: { available_item_count: 0, observed_item_count: 0, valid_item_count: 0, item_coverage_rate: null },
-    student_summaries: [], quality_record_ids: [],
+    student_summaries: [], quality_record_ids: [], items: [], needs_observation: [],
   }
 }
 
@@ -288,7 +297,7 @@ export function analyze_class(dataset: PreparedDataset, scope: ClassScope): Resu
     excluded_count: records.filter(row => row.action === 'exclude').length,
     grading_status_counts: Object.fromEntries([...statuses.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)),
     topics: topicIds.map(topicId => {
-      const selected = records.filter(row => row.topic_id === topicId)
+      const selected = records.filter(row => (row.corrected?.topic_id ?? row.topic_id) === topicId)
       return { ...summarize(selected), topic_id: topicId, taught: taught.has(topicId), observed_student_count: observedStudents(selected) }
     }),
     indicators: dataset.input.requirements.map(requirement => {
@@ -305,9 +314,47 @@ export function analyze_class(dataset: PreparedDataset, scope: ClassScope): Resu
       return { ...summarize(selected), student_id: id, review_count: selected.filter(row => row.action === 'review').length }
     }),
     quality_record_ids: records.filter(row => row.action === 'review').map(row => row.record_id).sort(),
+    items: allowed.filter(id => items.get(id)?.['材料类型'] === '题目').map(id => {
+      const selected = records.filter(row => row.item_id === id)
+      const scored = selected.filter(row => row.include_in_statistics)
+      const item = items.get(id)!
+      const scoringPoints = (item['评分点'] ?? '').split(/\r?\n/u).flatMap(line => {
+        const match = /^(\S+)\s+.+?\s+(\d+(?:\.\d+)?)\s*分\s*$/u.exec(line.trim())
+        if (!match) return []
+        const pointId = match[1]!, maximum = Number(match[2])
+        const samples = scored.flatMap(record => {
+          const parts = record.point_scores.split(/[；;\n]/u).map(part => part.trim().split(/\s*=\s*/u))
+          const text = parts.find(part => part[0] === pointId)?.[1]
+          return text === undefined ? [] : [{ record, score: Number(text) }]
+        })
+        const earned = samples.length ? samples.reduce((sum, sample) => sum + sample.score, 0) : null
+        const possible = samples.length ? samples.length * maximum : null
+        return [{ point_id: pointId, max_score: maximum, record_count: samples.length, valid_record_count: samples.length,
+          scored_student_count: observedStudents(samples.map(sample => sample.record)),
+          earned_score: earned, possible_score: possible,
+          score_rate: earned !== null && possible !== null && possible > 0 ? earned / possible : null,
+          score_distribution: distribution(samples.map(sample => sample.score)), evidence_ids: samples.map(sample => sample.record.record_id).sort() }]
+      })
+      return { ...summarize(selected), item_id: id, indicator_id: item['指标编号']!,
+        observed_student_count: observedStudents(selected), scored_student_count: observedStudents(scored),
+        score_distribution: distribution(scored.map(row => (row.corrected?.score ?? row.score)!)), scoring_points: scoringPoints }
+    }),
+    needs_observation: members.map(studentId => ({ student_id: studentId,
+      indicator_ids: dataset.input.requirements.filter(requirement => taught.has(requirement['主题编号']!)
+        && allowed.some(id => items.get(id)?.['指标编号'] === requirement['指标编号'])
+        && !valid.some(row => row.student_id === studentId && items.get(row.item_id)?.['指标编号'] === requirement['指标编号']))
+        .map(requirement => requirement['指标编号']!).sort(),
+    })).filter(row => row.indicator_ids.length > 0),
   }
   return result(dataset, { ...scope }, payload, payload.review_count ? 'needs_review' : valid.length ? 'ok' : 'insufficient_data',
     records.map(row => row.record_id), ['分数汇总仅描述有效作答样本，不将缺少作答的学生或题目计为零分。',
       '班级总得分率受作答覆盖影响；班级间比较应使用compare_classes的共同有效题集。',
-      '未教学主题保持独立标识，不能仅因没有记录列为班级薄弱项。'])
+      '未教学主题保持独立标识，不能仅因没有记录列为班级薄弱项。',
+      '逐题与评分点分布按有效作答事件计数，同时列出不同学生人数；分布不是共同题集加权均值。'])
+}
+
+function distribution(scores: number[]): Array<{ score: number; record_count: number }> {
+  const counts = new Map<number, number>()
+  for (const score of scores) counts.set(score, (counts.get(score) ?? 0) + 1)
+  return [...counts].sort(([left], [right]) => left - right).map(([score, record_count]) => ({ score, record_count }))
 }

@@ -21,7 +21,7 @@ export function prepare_workspace_dataset(input: DatasetInput, options: PrepareO
       if (!observed.has(scope_key(scope.student_id, scope.node_id))) continue
       const diagnosis = diagnose_student(dataset, scope, { curriculum })
       for (const finding of diagnosis.payload.findings) {
-        if (finding.category !== 'scoring_review') continue
+        if (finding.category !== 'scoring_review' || finding.finding_type === 'scoring_review') continue
         for (const id of finding.evidence_ids) {
           const current = recordIndex.get(id)
           if (current?.include_in_statistics) additionalReviews.set(id, [...(additionalReviews.get(id) ?? []), finding.description])
@@ -47,6 +47,7 @@ export function prepare_workspace_dataset(input: DatasetInput, options: PrepareO
     summary: {
       ...dataset.summary,
       included_count: current.filter(record => record.action === 'include').length,
+      stat_included_count: current.filter(record => record.include_in_statistics).length,
       review_count: current.filter(record => record.action === 'review').length,
       excluded_count: current.filter(record => record.action === 'exclude').length,
     },

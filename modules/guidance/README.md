@@ -12,4 +12,8 @@
 
 计划额外提供 `certainty`、`summary`、`evidence_gaps`；每项活动提供 `success_criteria`、`next_if_success`、`next_if_not`。九项正式指标使用指标级提示、观察点和调整规则，其他指标使用明确标注的通用回退。
 
+`build_class_plan(dataset, { class_id, node_id }, analysis?)` 使用同版本、同班同节点的班级分析，按已教且有可用题目的指标生成针对练习、解释迁移和补充观察分组。每组列出适用学生、证据、材料、可选题目、实施步骤、观察点与调整条件。复核评分即使保留统计也不作为教学判断依据；分组不是全班能力排名。此入口位于 `class.ts`，统一 CLI 也接受同名操作。
+
+活动顺序、首轮上限、分组方式及调整条件属于团队实施规则，不是官方阈值或已验证的教育学结论。
+
 运行行为测试：`node --test modules/guidance/tests/*.test.ts`。设置 `STUDY_DATA_DIR` 指向本地私有 CSV 目录后，额外核对三名正式展示案例与实际题目引用；未设置时该项明确跳过。合成测试不含原始赛事记录。整体运行与验证入口由上层统一提供，进度统一记录在 [项目日志](../PROJECT_LOG.md)。

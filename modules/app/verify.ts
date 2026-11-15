@@ -25,8 +25,10 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
   const classes = new Set(data.browser_snapshot.input.students.map(student => student['模拟班级编号']!))
   if (Object.keys(data.cases).length !== students.size * nodes.size) errors.push('学生案例数量与输入名单和节点数量不一致')
   if (Object.keys(data.class_reports).length !== classes.size * nodes.size) errors.push('班级报告数量与输入班级和节点数量不一致')
+  if (Object.keys(data.class_plans).length !== classes.size * nodes.size) errors.push('班级建议数量与输入班级和节点数量不一致')
   for (const student of students) for (const node of nodes.keys()) if (!Object.hasOwn(data.cases, scope_key(student, node))) errors.push('学生节点案例缺失')
   for (const group of classes) for (const node of nodes.keys()) if (!Object.hasOwn(data.class_reports, scope_key(group, node))) errors.push('班级节点报告缺失')
+  for (const group of classes) for (const node of nodes.keys()) if (!Object.hasOwn(data.class_plans, scope_key(group, node))) errors.push('班级节点建议缺失')
   function check(result: ResultEnvelope<unknown>, label: string, expected: Record<string, string> = {}): void {
     for (const key of ['schema_version', 'dataset_version', 'policy_version', 'producer_version', 'source_mode'] as const) {
       if (result[key] !== workspace[key]) errors.push(`${label}: ${key}不同`)
@@ -77,8 +79,8 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
       for (const id of [...activity.item_ids, ...activity.material_ids]) if (!materials.has(id)) errors.push(`${key}: 活动材料${id}不存在`)
       for (const id of activity.evidence_ids) {
         const record = records.get(id)
-        if (!record?.include_in_statistics) errors.push(`${key}: 活动使用了无效评分记录${id}`)
-        if (record && (materials.get(record.item_id)?.['指标编号'] !== activity.indicator_id || record.topic_id !== activity.topic_id)) errors.push(`${key}: 活动证据${id}与指标主题不同`)
+        if (!record?.include_in_statistics || record.action === 'review') errors.push(`${key}: 活动使用了无效评分记录${id}`)
+        if (record && (materials.get(record.item_id)?.['指标编号'] !== activity.indicator_id || (record.corrected?.topic_id ?? record.topic_id) !== activity.topic_id)) errors.push(`${key}: 活动证据${id}与指标主题不同`)
       }
       ownEvidence(activity.evidence_ids, expected.student_id, expected.node_id, key)
       const allowed = nodes.get(expected.node_id)
@@ -94,10 +96,43 @@ export function verify_workspace(workspace: ResultEnvelope<WorkspacePayload>): V
       ownEvidence(hint.evidence_ids, expected.student_id, expected.node_id, key)
       if (hint.payload.mode !== 'student' || hint.payload.teacher_solution !== undefined) errors.push(`${key}: 学生提示包含教师答案字段`)
     }
+    for (const activity of entry.plan.payload.activities) for (const itemId of activity.item_ids) {
+      const hints = entry.hints[itemId]
+      if (!hints || hints.length !== 3 || hints.map(hint => hint.payload.level).sort().join(',') !== '1,2,3') errors.push(`${key}: 三级学生提示不完整`)
+      const teacher = entry.teacher_hints[itemId]
+      if (!teacher || teacher.payload.mode !== 'teacher' || !teacher.payload.teacher_solution) errors.push(`${key}: 教师核对内容缺失`)
+      else check(teacher, `${key}:teacher`, { ...expected, item_id: itemId, mode: 'teacher' })
+    }
   }
   for (const [key, report] of Object.entries(data.class_reports)) {
     if (key !== scope_key(report.payload.class_id, report.payload.node_id) || !classes.has(report.payload.class_id) || !nodes.has(report.payload.node_id)) errors.push(`${key}: 班级报告对象不同`)
     check(report, key, { class_id: report.payload.class_id, node_id: report.payload.node_id })
+    for (const item of report.payload.items) {
+      if (!nodes.get(report.payload.node_id)?.has(item.item_id)) errors.push(`${key}: 班级题目超出当前节点`)
+      for (const id of item.evidence_ids) {
+        const record = records.get(id)
+        const member = data.students.find(student => student.student_id === record?.student_id)
+        if (!record?.include_in_statistics || record.node_id !== report.payload.node_id || member?.class_id !== report.payload.class_id || record.item_id !== item.item_id) errors.push(`${key}: 班级逐题证据范围不同`)
+      }
+    }
+  }
+  for (const [key, plan] of Object.entries(data.class_plans)) {
+    const { class_id: group, node_id: node } = plan.payload
+    if (key !== scope_key(group, node) || !classes.has(group) || !nodes.has(node)) errors.push(`${key}: 班级建议对象不同`)
+    check(plan, key, { class_id: group, node_id: node })
+    const memberIds = new Set(data.students.filter(student => student.class_id === group).map(student => student.student_id))
+    const taught = new Set(data.browser_snapshot.input.nodes.find(value => value['节点编号'] === node)?.['已教及测量主题']?.split(/[、,，;；\s]+/u))
+    for (const recommendation of plan.payload.recommendations) {
+      if (!taught.has(recommendation.topic_id) || recommendation.student_ids.some(id => !memberIds.has(id))) errors.push(`${key}: 建议范围包含未教主题或其他班学生`)
+      for (const id of recommendation.item_ids) if (!nodes.get(node)?.has(id) || materials.get(id)?.['指标编号'] !== recommendation.indicator_id) errors.push(`${key}: 班级建议题目范围不同`)
+      for (const id of recommendation.material_ids) if (!materials.has(id)) errors.push(`${key}: 班级建议材料不存在`)
+      for (const id of recommendation.evidence_ids) {
+        const record = records.get(id)
+        if (!record?.include_in_statistics || record.action === 'review' || record.node_id !== node
+          || !recommendation.student_ids.includes(record.student_id) || materials.get(record.item_id)?.['指标编号'] !== recommendation.indicator_id) errors.push(`${key}: 班级建议依据无效`)
+      }
+      if (!recommendation.goal || !recommendation.rationale || !recommendation.steps.length || !recommendation.observation || !recommendation.adjust_when) errors.push(`${key}: 班级建议缺少实施与调整条件`)
+    }
   }
   return {
     status: errors.length ? 'failed' : 'passed',

@@ -1,6 +1,7 @@
 name: Study companion
 
 on:
+  workflow_dispatch:
   push:
     branches: [keill, weiwenyu, master]
     paths:

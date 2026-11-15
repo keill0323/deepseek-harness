@@ -11,6 +11,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 PASS_COUNT=0
 FAIL_COUNT=0
+LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/study-verify.XXXXXX") || exit 1
+printf '复验日志：%s\n' "$LOG_DIR"
+if [ -n "$STUDY_DATA_DIR" ]; then
+  STUDY_DATA_DIR=$(cd "$STUDY_DATA_DIR" && pwd) || exit 1
+  export STUDY_DATA_DIR
+fi
 FAILED_SUMMARY=""
 
 step() { printf '\n== %s ==\n' "$1"; }
@@ -18,13 +24,13 @@ ok() { PASS_COUNT=$((PASS_COUNT + 1)); printf '✓ %s\n' "$*"; }
 bad() { FAIL_COUNT=$((FAIL_COUNT + 1)); FAILED_SUMMARY="$FAILED_SUMMARY
   ✗ $*"; printf '✗ %s\n' "$*"; }
 
-# ---------- 1. Python 参考实现（481 项：固定样例+随机性质+守卫） ----------
+# ---------- 1. Python 参考实现 ----------
 step "Python 参考实现测试"
 if python3 -c "import pytest" >/dev/null 2>&1; then
-  if (cd competition && python3 -m pytest tests/ -q >/tmp/verify_py.log 2>&1); then
-    ok "python-tests: $(tail -1 /tmp/verify_py.log)"
+  if (cd competition && python3 -m pytest tests/ -q >"$LOG_DIR/python.log" 2>&1); then
+    ok "python-tests: $(tail -1 "$LOG_DIR/python.log")"
   else
-    bad "python-tests（详见 /tmp/verify_py.log）"
+    bad "python-tests（详见 $LOG_DIR/python.log）"
   fi
 else
   bad "python-tests: 未安装 pytest"
@@ -32,16 +38,18 @@ fi
 
 # ---------- 2. TS 全模块（构建+类型+行为，合成数据） ----------
 step "TypeScript 全模块测试"
-if npm run study:test >/tmp/verify_ts.log 2>&1; then
-  ok "ts-tests: $(grep -c 'ℹ pass' /tmp/verify_ts.log) 组套件全过"
+if [ -n "$STUDY_DATA_DIR" ]; then
+  printf '已指定正式数据：在基准生成后运行一次完整测试。\n'
+elif npm run study:test >"$LOG_DIR/typescript.log" 2>&1; then
+  ok "ts-tests: $(grep -c 'ℹ pass' "$LOG_DIR/typescript.log") 组套件全过"
 else
-  bad "ts-tests（详见 /tmp/verify_ts.log）"
+  bad "ts-tests（详见 $LOG_DIR/typescript.log）"
 fi
 
 # ---------- 3. 真实数据全链路（可选） ----------
 if [ -n "$STUDY_DATA_DIR" ]; then
   step "真实数据：Python 管线（干净目录）"
-  OUT=$(mktemp -d /tmp/study-verify-XXXX)
+  OUT="$LOG_DIR/python-output"
   if (cd competition && PYTHONPATH=src python3 -m study_companion pipeline \
         --data-dir "$STUDY_DATA_DIR" --output-dir "$OUT" >/dev/null 2>&1); then
     ok "python-pipeline: $OUT"
@@ -50,8 +58,7 @@ if [ -n "$STUDY_DATA_DIR" ]; then
   fi
 
   step "真实数据：跨语言基准生成"
-  REF="$ROOT/tmp/study-diff/python_reference.json"
-  mkdir -p "$ROOT/tmp/study-diff"
+  REF="$LOG_DIR/python_reference.json"
   if python3 - "$STUDY_DATA_DIR" "$REF" << 'PYEOF' >/dev/null 2>&1
 import json, sys
 sys.path.insert(0, 'competition/src')
@@ -80,25 +87,32 @@ PYEOF
 
   step "真实数据：TS 全模块（live + 跨语言对拍）"
   if STUDY_DATA_DIR="$STUDY_DATA_DIR" STUDY_DIFF_REFERENCE="$REF" \
-     npm run study:test >/tmp/verify_live.log 2>&1; then
+     npm run study:test >"$LOG_DIR/live.log" 2>&1; then
     ok "ts-live-parity: 数字与 Python 完全一致"
   else
-    bad "ts-live-parity（详见 /tmp/verify_live.log）"
+    bad "ts-live-parity（详见 $LOG_DIR/live.log）"
   fi
 
   step "真实数据：交互报告导出（干净目录）"
   # CLI 要求输出目录不存在（拒绝覆盖）：基目录 mktemp，输出指向其下不存在的子目录
-  REPORT_BASE=$(mktemp -d /tmp/study-report-XXXX)
-  REPORT="$REPORT_BASE/report"
-  node modules/app/cli.ts export --data "$STUDY_DATA_DIR" \
-    --out "$REPORT" --summary-only >/dev/null 2>&1 || true
-  if [ -f "$REPORT/index.html" ]; then
+  REPORT="$LOG_DIR/live-report"
+  if node modules/app/cli.ts export --data "$STUDY_DATA_DIR" \
+    --out "$REPORT" --summary-only >"$LOG_DIR/report.log" 2>&1 \
+    && node modules/app/check-export.ts "$REPORT" live >>"$LOG_DIR/report.log" 2>&1; then
     ok "report-export: $REPORT/index.html"
   else
     bad "report-export"
   fi
 else
   printf '\n（未设置 STUDY_DATA_DIR：跳过真实数据链路，仅合成验证）\n'
+fi
+
+step "合成输入干净导出与完整性检查"
+if npm run study:demo -- --out "$LOG_DIR/demo" >"$LOG_DIR/demo.log" 2>&1 \
+  && node modules/app/check-export.ts "$LOG_DIR/demo/report" fixture >>"$LOG_DIR/demo.log" 2>&1; then
+  ok "fixture-export: 完成标记、机器核验与各对象文件一致"
+else
+  bad "fixture-export（详见 $LOG_DIR/demo.log）"
 fi
 
 # ---------- 汇总 ----------

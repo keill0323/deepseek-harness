@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -12,7 +13,7 @@ const HELP = `智慧学伴完整本地工具
   node modules/app/cli.ts export --data <CSV目录> --out <新目录> [--summary-only]
   node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request <JSON>
   node modules/app/cli.ts run --data <CSV目录> --operation <操作名> --request-file <JSON文件> [--out <新JSON文件>] [--summary-only]
-操作：get_student_stats、get_evidence、compare_students、compare_with_peers、analyze_class、compare_classes、get_curriculum、diagnose_student、build_learning_plan、get_hint、workspace。
+操作：get_student_stats、get_evidence、compare_students、compare_with_peers、analyze_class、compare_classes、get_curriculum、diagnose_student、build_learning_plan、build_class_plan、get_hint、workspace。
 export 导出独立交互HTML、JSON成果、字段说明和自动核验。--fixture 标识测试数据。
 --summary-only 仅回传结果状态与本地文件路径，供Harness调用；run时必须同时指定--out。
 `
@@ -95,13 +96,14 @@ export async function run_companion_cli(args: string[]): Promise<number> {
       findings: '事实、有限推断、证据不足、评分复核分别标明', source_mode: 'live为实际输入，fixture为开发样例',
       engine: 'local_rules为本地统计与规则；不表示远程LLM输出',
       structures: {
-        workspace: { students: '输入学生及班级名单', nodes: '测验节点与测量范围', summary: '原始行、当前事件和质量处理计数', cases: '以学生编号:节点编号索引的完整个体结果', class_reports: '以班级编号:节点编号索引的群体结果', curriculum: '课程主题、指标与材料定位', quality_records: '待复核的当前记录', browser_snapshot: '仅供本地教师报告计算比较及核对证据，题库参考答案和解析已去除' },
+        workspace: { students: '输入学生及班级名单', nodes: '测验节点与测量范围', summary: '原始行、当前事件和质量处理计数', cases: '以学生编号:节点编号索引的完整个体结果', class_reports: '以班级编号:节点编号索引的群体结果（含逐题与评分点事件分布）', class_plans: '同班同节点的分组教学建议，含对象、依据、实施步骤、观察与调整条件', curriculum: '课程主题、指标与材料定位', quality_records: '待复核的当前记录', browser_snapshot: '仅供本地教师报告计算比较及核对证据，题库参考答案和解析已去除' },
         result: { scope: '本次操作明确选择的学生、班级、节点或展示模式', payload: '操作特定结果', limitations: '影响解释和适用范围的限制' },
         evidence: { record_id: '记录编号', event_id: '独立作答事件', revision: '十进制正整数修订版本', student_id: '模拟学生编号', item_id: '题目材料编号', topic_id: '主题编号', node_id: '测验节点', grading_status: '原始评分状态', score: '记录得分，缺失或无效为null', max_score: '记录满分', answer: '原始最终作答，仅限教师证据', steps: '原始过程，仅限教师证据', point_scores: '原始分点评分', include_in_statistics: '是否允许参与统计', action: 'include纳入、exclude正常未评分排除、review人工复核', quality_issues: '问题代码与原因', original_values: '不改写的导入字段', source: '来源CSV与逻辑行编号' },
         statistics: { record_count: '当前事件记录数', valid_record_count: '通过质量检查且已评分的记录数', earned_score: '有效得分合计，没有有效记录为null', possible_score: '同批有效记录满分合计，没有有效记录为null', topics: '按主题统计及taught教学范围', indicators: '按观察指标统计', review_record_ids: '需复核的当前记录编号' },
         comparison: { candidate_item_ids: '请求候选题目', shared_item_ids: '左右侧均有有效样本的共同题目', excluded_items: '从两侧共同移除的题目与原因', weight_mode: '共同题目的满分占比', within_item_aggregation: '题内先按每名学生平均得分率，再平均学生', exclude_self: '同伴比较是否先排除本人', comparable: '是否存在可计算共同题集', items: '逐题人数、记录数、平均得分率、权重和两侧证据', left_rate: '左侧共同题集加权得分率', right_rate: '右侧共同题集加权得分率', delta_rate: '左侧减右侧的比例差', reason_codes: '无法比较或移除题目的原因' },
         diagnosis: { category: 'fact事实、inference有限推断、insufficient_data证据不足、scoring_review评分复核', finding_type: '具体发现类型', step_refs: '从1开始的原始步骤编号，不能可靠定位时为空', point_refs: '原题评分点编号', material_ids: '输入材料编号', covered_indicator_ids: '已有有效观察的指标', unobserved_indicator_ids: '本节点可测但缺有效记录的指标' },
         activity: { order: '建议实施顺序', kind: 'targeted_practice针对练习、extension解释迁移、observation补充观察', goal: '活动目标', rationale: '选择活动的已有依据', item_ids: '实际题目编号', prompt: '不直接给最终答案的活动提示', observation: '后续应观察的表现', adjust_when: '根据实际新记录调整活动的条件' },
+        class_recommendation: { student_ids: '建议适用学生，不表示能力排名', evidence_ids: '同班同节点同指标的非复核计分记录', item_ids: '输入提供的同指标节点允许题集', steps: '教师实施顺序', observation: '待收集的表现', adjust_when: '团队实施规则，不是官方阈值' },
         hint: { level: '1到3的帮助等级', mode: 'student学生提示或teacher教师查看', hint: '该级方法提示', requires_review: '现有评分是否待复核', teacher_solution: '仅显式教师模式出现，学生提示和学生练习导出不含此字段' },
         curriculum: { indicator_id: '观察指标编号', question_ids: '对应题目编号', textbook_pages: '输入索引提供的教材页段', course_standard: '课标文件名、文件页、正文页和索引编号；verification=input_index仅代表来自索引', materials: '实际材料编号、类型、标题与源文件' },
       },
@@ -112,11 +114,14 @@ export async function run_companion_cli(args: string[]): Promise<number> {
     for (const [key, entry] of Object.entries(workspace.payload.class_reports)) {
       await writeNew(join(directory, 'classes', `${encodeURIComponent(key)}.json`), entry)
     }
-    await writeFile(join(directory, 'README.txt'), '双击index.html查看本地交互报告。workspace.json及students、classes为可机读成果，fields.json解释字段。acceptance.json仅记录自动核验，真人复验仍待完成。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
+    for (const [key, entry] of Object.entries(workspace.payload.class_plans)) {
+      await writeNew(join(directory, 'class-plans', `${encodeURIComponent(key)}.json`), entry)
+    }
+    await writeFile(join(directory, 'README.txt'), '双击index.html查看本地交互报告。workspace.json及students、classes、class-plans为可机读成果，fields.json解释字段。acceptance.json仅记录自动核验，真人复验仍待完成。赛事数据仅限本次比赛本地使用，不得上传公网。\n', { encoding: 'utf8', flag: 'wx' })
     await writeNew(join(directory, 'manifest.json'), {
-      status: 'complete', schema_version: workspace.schema_version, dataset_version: workspace.dataset_version,
+      status: 'complete', generated_at: new Date().toISOString(), schema_version: workspace.schema_version, dataset_version: workspace.dataset_version,
       policy_version: workspace.policy_version, producer_version: workspace.producer_version, source_mode: workspace.source_mode,
-      entry: 'index.html', verification: 'acceptance.json', machine_readable: 'workspace.json', human_review: 'pending',
+      entry: 'index.html', report_sha256: createHash('sha256').update(html).digest('hex'), verification: 'acceptance.json', machine_readable: 'workspace.json', human_review: 'pending',
     })
     process.stdout.write(`${JSON.stringify({
       result_status: workspace.result_status, engine: 'local_rules', output_directory: directory,
