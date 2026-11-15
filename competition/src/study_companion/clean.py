@@ -46,6 +46,8 @@ ISSUE_NODE_OUT_OF_SCOPE = "node_out_of_scope"
 ISSUE_SEMANTIC_REVIEW = "semantic_review"
 ISSUE_FULL_MISMATCH_BANK = "full_score_mismatch_bank"
 ISSUE_SCORE_REPAIRED_FROM_POINTS = "score_repaired_from_points"
+ISSUE_INVALID_POINT_SCORES = "invalid_point_scores"
+ISSUE_SCORE_NEGATIVE = "score_negative"
 
 # 处置规则与依据（写入质量报告，保证可追溯）
 DISPOSITIONS = {
@@ -77,6 +79,14 @@ DISPOSITIONS = {
     ISSUE_FULL_MISMATCH_BANK: {
         "处置": "以题库满分为准修正 effective_full_score，记录保留",
         "依据": "题目与材料.csv 是满分权威来源",
+    },
+    ISSUE_INVALID_POINT_SCORES: {
+        "处置": "隔离（excluded）：评分点编号、取值或范围不可信，不参与得分统计",
+        "依据": "评分点必须属于当前题目，且每一项得分非负、不超过该项满分",
+    },
+    ISSUE_SCORE_NEGATIVE: {
+        "处置": "隔离（excluded）：负分不参与统计，证据保留待人工复核",
+        "依据": "得分必须为非负数；负分不能生成有效得分率",
     },
 }
 
@@ -205,14 +215,29 @@ def detect_issues(vr: ValidRecord, dataset: Dataset,
         issues.append(ISSUE_FULL_MISMATCH_BANK)
         vr.effective_full_score = question.full_score
 
-    # 3) 得分超出满分 / 总分与评分点合计不一致（仅已评分，按有效满分判断）
+    # 3) 得分范围、评分点来源与总分一致性（仅已评分，按有效满分判断）
     effective_full = vr.effective_full_score
     if row.scoring_status == SCORED and row.score is not None:
+        if row.score < 0:
+            issues.append(ISSUE_SCORE_NEGATIVE)
         if effective_full is not None and row.score > effective_full:
             issues.append(ISSUE_SCORE_EXCEEDS_FULL)
-        if row.point_scores:
-            if sum(row.point_scores.values()) != row.score:
-                issues.append(ISSUE_TOTAL_POINTS_MISMATCH)
+        rubric = question.scoring_points if question is not None else []
+        rubric_by_id = {point.point_id: point.score for point in rubric}
+        point_scores_invalid = (
+            row.point_scores_invalid
+            or bool(row.point_scores) != bool(rubric)
+            or len(rubric_by_id) != len(rubric)
+            or set(row.point_scores) != set(rubric_by_id)
+            or any(
+                value < 0 or value > rubric_by_id.get(point_id, -1)
+                for point_id, value in row.point_scores.items()
+            )
+        )
+        if point_scores_invalid:
+            issues.append(ISSUE_INVALID_POINT_SCORES)
+        if row.point_scores and sum(row.point_scores.values()) != row.score:
+            issues.append(ISSUE_TOTAL_POINTS_MISMATCH)
 
     # 4) 节点范围外材料
     if node is not None and row.material_id not in node.available_questions:
@@ -228,15 +253,19 @@ def detect_issues(vr: ValidRecord, dataset: Dataset,
     # 口径：隔离 > 评分点自洽修正 > 修正 > 复核保留 > 正常
     if (ISSUE_SCORE_EXCEEDS_FULL in issues
             and repair_consistent_points
+            and ISSUE_INVALID_POINT_SCORES not in issues
+            and ISSUE_SCORE_NEGATIVE not in issues
+            and ISSUE_NODE_OUT_OF_SCOPE not in issues
             and row.point_scores
-            and row.full_score is not None
-            and sum(row.point_scores.values()) == row.full_score):
+            and effective_full is not None
+            and sum(row.point_scores.values()) == effective_full):
         # 方案 B：评分点合计==满分 -> 以评分点合计为准（corrected）
         issues.append(ISSUE_SCORE_REPAIRED_FROM_POINTS)
         vr.effective_score = sum(row.point_scores.values())
         vr.stats_flag = FLAG_CORRECTED
     elif ISSUE_SCORE_EXCEEDS_FULL in issues or ISSUE_TOTAL_POINTS_MISMATCH in issues \
-            or ISSUE_NODE_OUT_OF_SCOPE in issues:
+            or ISSUE_NODE_OUT_OF_SCOPE in issues or ISSUE_INVALID_POINT_SCORES in issues \
+            or ISSUE_SCORE_NEGATIVE in issues:
         vr.stats_flag = FLAG_EXCLUDED
         vr.effective_score = None
     elif ISSUE_THEME_MISMATCH in issues or ISSUE_FULL_MISMATCH_BANK in issues:

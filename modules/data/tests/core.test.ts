@@ -305,3 +305,23 @@ test('dataset observations list information gaps without touching statistics', a
   assert.deepEqual(obs.node_students_without_records['M2'], ['S1', 'S2', 'S3'], '全部作答都在 M1')
   assert.ok(obs.note.includes('不得解释为未掌握'))
 })
+
+
+test('authoritative item maximum prevents a false out-of-range exclusion', () => {
+  const ds = prepare([make_record({
+    满分: '1',
+    得分: '2',
+    评分点得分: 'A1P1=1；A1P2=1；A1P3=0',
+  })])
+  const record = ds.current[0]
+  assert.ok(record)
+  assert.equal(record.corrected?.max_score, 3)
+  assert.equal(record.include_in_statistics, true)
+  assert.equal(record.action, 'include')
+  assert.ok(record.quality_issues.some(issue => issue.code === 'maximum_mismatch'))
+  assert.ok(!record.quality_issues.some(issue => issue.code === 'score_out_of_range'))
+  const stats = get_student_stats(ds, { student_id: 'S1', node_id: 'M1' })
+  assert.equal(stats.payload.earned_score, 2)
+  assert.equal(stats.payload.possible_score, 3)
+  assert.equal(stats.payload.score_rate, 2 / 3)
+})

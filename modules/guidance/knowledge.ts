@@ -35,7 +35,7 @@ export const INDICATOR_GUIDANCE: Readonly<Record<string, IndicatorGuidance>> = O
     hints: [
       '先完成整式化简，再看结果中还有没有字母。',
       '把含同一字母的项合并，观察系数是否相互抵消；不要只验证一个特例。',
-      '用“结果对所有取值都不变”或“结果是某数的倍数”写出规范结论。',
+      '写出结论时，必须引用化简后的式子说明它如何支持你的判断；不要只写“对”或“错”。',
     ],
     observation: ['是否先化简再判断', '是否说明结论为什么具有一般性', '是否只验证了一个特例'],
     adjustment: ['能解释时补结构相近的变式。', '只代入特例时，要求改写为一般性说明。', '无法说明时，回到合并同类项并做口头解释。'],
@@ -128,5 +128,7 @@ export const GENERIC_GUIDANCE: IndicatorGuidance = Object.freeze({
  * @returns Stable local guidance without student answers.
  */
 export function guidance_for(indicatorId: string | undefined): IndicatorGuidance {
-  return indicatorId ? INDICATOR_GUIDANCE[indicatorId] ?? GENERIC_GUIDANCE : GENERIC_GUIDANCE
+  return indicatorId && Object.hasOwn(INDICATOR_GUIDANCE, indicatorId)
+    ? INDICATOR_GUIDANCE[indicatorId]!
+    : GENERIC_GUIDANCE
 }

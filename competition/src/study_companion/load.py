@@ -7,6 +7,7 @@
 """
 
 import csv
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -139,16 +140,29 @@ def parse_scoring_points(text: str) -> List[ScoringPoint]:
     return points
 
 
+def parse_point_scores_checked(text: str) -> Tuple[Dict[str, int], bool]:
+    """Parse point scores while retaining whether any fragment was malformed or duplicated."""
+    result: Dict[str, int] = {}
+    invalid = False
+    for part in re.split(r"[；;\n]", text):
+        part = part.strip()
+        if not part:
+            continue
+        match = re.fullmatch(r"([^=\s]+)\s*=\s*([+-]?\d+)", part)
+        if not match:
+            invalid = True
+            continue
+        key, value = match.group(1), int(match.group(2))
+        if key in result:
+            invalid = True
+            continue
+        result[key] = value
+    return result, invalid
+
+
 def parse_point_scores(text: str) -> Dict[str, int]:
     """解析评分点得分：``Q043P1=1；Q043P2=0`` -> {'Q043P1': 1, ...}."""
-    result = {}
-    for part in text.replace(";", "；").split("；"):
-        part = part.strip()
-        if not part or "=" not in part:
-            continue
-        key, value = part.split("=", 1)
-        result[key.strip()] = int(value.strip())
-    return result
+    return parse_point_scores_checked(text)[0]
 
 
 def load_requirements(data_dir: Path) -> List[Requirement]:
@@ -247,6 +261,7 @@ def load_records(data_dir: Path) -> List[AnswerRow]:
         elif r["得分"]:
             raise LoadError(
                 f"{r['记录编号']} {status}却携带得分 {r['得分']!r}：违反字段契约")
+        point_scores, point_scores_invalid = parse_point_scores_checked(r["评分点得分"])
         row = AnswerRow(
             record_id=r["记录编号"], student_id=r["学生编号"],
             material_id=r["材料编号"], theme_recorded=r["主题编号"],
@@ -257,8 +272,9 @@ def load_records(data_dir: Path) -> List[AnswerRow]:
             full_score=_to_int_checked(r["满分"], "满分", r["记录编号"]),
             final_answer=r["学生最终作答"],
             solution_steps=[s for s in r["解答过程"].splitlines() if s.strip()],
-            point_scores=parse_point_scores(r["评分点得分"]),
+            point_scores=point_scores,
             raw=r,
+            point_scores_invalid=point_scores_invalid,
         )
         event_rev = (row.event_id, row.revision)
         if event_rev in seen_event_revs:
