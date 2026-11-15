@@ -94,7 +94,7 @@ export interface ClassAnalysisPayload extends ScoreSummary {
 }
 
 const LIMITATIONS = [
-  '比较仅限同一节点的共同有效题集，未观察或待复核的记录不按零分处理。',
+  '比较仅限同一节点的共同有效题集，缺少有效样本不补零，允许计分的真实零分保留。',
   '题目先按学生平均得分率，再按题目满分加权；各侧使用相同题目与权重。差值单位为比例，百分点字段已乘100。',
   '结果描述已提供记录，不代表全科能力或教学效果，不能将不同节点的分数差直接解释为进步。',
 ]
@@ -173,7 +173,8 @@ function compare(dataset: PreparedDataset, payload: ComparisonPayload, scope: Re
   const candidateSet = new Set(candidates)
   const selected = dataset.current.filter(row => row.node_id === payload.node_id && candidateSet.has(row.item_id)
     && (leftSet.has(row.student_id) || rightSet.has(row.student_id)))
-  payload.quality_record_ids = selected.filter(row => row.action === 'review').map(row => row.record_id).sort()
+  const reviewed = selected.filter(row => row.action === 'review')
+  payload.quality_record_ids = reviewed.map(row => row.record_id).sort()
   const valid = selected.filter(row => row.include_in_statistics)
   for (const id of candidates) {
     const leftRows = valid.filter(row => row.item_id === id && leftSet.has(row.student_id))
@@ -207,7 +208,13 @@ function compare(dataset: PreparedDataset, payload: ComparisonPayload, scope: Re
   const evidence = payload.items.flatMap(item => [...item.left_evidence_ids, ...item.right_evidence_ids])
   const limitations = [...LIMITATIONS]
   if (payload.excluded_items.length) limitations.push('一侧没有有效样本的题目已从双方共同题集移除，详见excluded_items。')
-  if (payload.quality_record_ids.length) limitations.push('本次范围内存在待复核记录，均未进入比较计算。')
+  if (reviewed.length) {
+    const used = new Set(evidence)
+    const participating = reviewed.filter(row => used.has(row.record_id)).length
+    const blocked = reviewed.filter(row => !row.include_in_statistics).length
+    const unshared = reviewed.length - participating - blocked
+    limitations.push(`本次范围内有 ${reviewed.length} 条待复核记录：${participating} 条按有效分值参与比较，${blocked} 条未满足计分条件被排除，${unshared} 条可计分但不在共同有效题集中。`)
+  }
   return result(dataset, scope, payload, payload.quality_record_ids.length ? 'needs_review' : payload.comparable ? 'ok' : 'insufficient_data', evidence, limitations)
 }
 
